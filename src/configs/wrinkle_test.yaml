@@ -1,0 +1,14 @@
+augmentation: false
+task: 'wrinkle'
+root_dir: '/home/hocheol/inskin_ai/no_track/datasets/wrinkle_data/v0.3/v0.3_data'
+meta_file: '/home/hocheol/inskin_ai/no_track/datasets/wrinkle_data/v0.3/v0.3.0/092_test_data/092_path.json'
+model_path: '/home/hocheol/inskin_ai/no_track/save_models/wrinkle/v0.3/trashlab_260220_014632_S/epoch70_260220_014632.keras'
+result_dir: '/home/hocheol/inskin_ai/no_track/inference_results/effnet'
+batch_size: 32
+input_shape: [384, 384, 3]
+one_hot: false
+# HE는 실패
+# training_datasets:
+#   - '028_data'
+#   - '030_data'
+#   - '045_data'

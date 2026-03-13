@@ -1,0 +1,17 @@
+aug_list:
+- 'hsv_random_brightness'
+- 'hsv_random_contrast'
+- 'hsv_gamma_correction'
+- 'gaussian_noise'
+- 'flip'
+task: 'wrinkle_reg'
+root_dir: '/home/hocheol/inskin_ai/no_track/datasets/wrinkle_data/v0.3/v0.3_data'
+meta_file: '/home/hocheol/inskin_ai/no_track/datasets/wrinkle_data/v0.3/v0.3.0/wrinkle_label_paths.json'
+save_dir: '/home/hocheol/inskin_ai/no_track/save_models/wrinkle_reg/v0.1'
+batch_size: 64
+epochs: 70
+learning_rate: 0.0001
+kernel_regularizer: 0.0001
+model_size: 'S'
+input_shape: [384, 384, 3]
+comment: '주름 회귀 버전'

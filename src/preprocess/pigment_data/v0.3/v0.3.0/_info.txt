@@ -1,0 +1,6 @@
+mp 이미지 읽기 버리기. 별로 도움 안되는 것 같음
+피부 아닌 부분 제거
+
+
+
+mp 이미지 읽기 써야됨. batch inference(tf.io.read)랑 tflite inference(face_landmarker.create_mp_image) 차이 많이 남

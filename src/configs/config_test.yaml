@@ -1,0 +1,25 @@
+augmentation: true
+task: 'pig_3ch'
+root_dir: '/home/hocheol/inskin_ai/no_track/datasets/pigment_data/v0.4/v0.4_data'
+meta_file: '/home/hocheol/inskin_ai/no_track/datasets/pigment_data/v0.4/v0.4.1/pig_label_paths.json'
+save_dir: '/home/work/hocheol_dir/save_models/pig_3ch/v0.4'
+batch_size: 128
+epochs: 70
+learning_rate: 0.00005
+kernel_regularizer: 0.01
+model_size: 'S'
+input_shape: [384, 384, 3]
+one_hot: true
+comment: '117 데이터 추가만의 성능 차이 보기 위해 117 데이터 제외'
+loss: 'categorical_crossentropy'
+aug:
+  flip: {p:0.5}
+  hello: {fjdskla:22}
+# HE는 실패
+# training_datasets:
+#   - '028_data'
+#   - '030_data'
+#   - '034_data'
+#   - '045_data'
+#   - '118_data'
+#   - '999_data'

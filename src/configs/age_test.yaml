@@ -1,0 +1,19 @@
+augmentation: false
+task: 'age_cls'
+root_dir: '/home/hocheol/inskin_ai/no_track/datasets/age_data/v0.3/v0.3_data'
+meta_file: '/home/hocheol/inskin_ai/no_track/datasets/age_data/v0.3/v0.3.0/092_data/age_label_paths_092.json'
+input_shape: [384, 384, 3]
+batch_size: 8
+one_hot: false
+# HE는 실패
+# training_datasets:
+#   - '028_data'
+#   - '030_data'
+#   - '034_data'
+#   - '045_data'
+#   - '092_data'
+#   - '114_data'
+#   - '117_data'
+#   - '118_data'
+#   - '282_data'
+#   - '999_data'

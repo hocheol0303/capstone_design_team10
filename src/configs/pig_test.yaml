@@ -1,0 +1,16 @@
+augmentation: false
+task: 'pig_3ch'
+root_dir: '/home/hocheol/inskin_ai/no_track/datasets/pigment_data/v0.4/v0.4_data'
+meta_file: '/home/hocheol/inskin_ai/no_track/datasets/pigment_data/v0.4/v0.4.1/092_test_data/092_path.json'
+model_path: '/home/hocheol/inskin_ai/no_track/save_models/pig_3ch/v0.4/251015_084023_S/epoch70_251015_084023.keras'
+batch_size: 8
+input_shape: [384, 384]
+one_hot: false
+# HE는 실패
+# training_datasets:
+#   - '028_data'
+#   - '030_data'
+#   - '034_data'
+#   - '045_data'
+#   - '118_data'
+#   - '999_data'
