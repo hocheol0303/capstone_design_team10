@@ -2,6 +2,7 @@
 FROM python:3.11-slim
 
 ENV DEBIAN_FRONTEND=noninteractive
+ENV PYTHONUNBUFFERED=1
 
 # OpenCV / MediaPipe 런타임 의존성만 설치
 RUN apt-get update && apt-get install -y \
@@ -12,7 +13,7 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # 작업 디렉토리 설정
-WORKDIR /home/hocheol/inskin_ai/pipeline
+WORKDIR /workspace
 
 # pipeline 실행에 필요한 패키지만 설치
 # tensorflow-cpu: tf.lite.Interpreter 제공 (GPU 드라이버 불필요)

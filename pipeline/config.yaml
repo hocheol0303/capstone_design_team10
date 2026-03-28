@@ -4,7 +4,7 @@
 
 gender: male   # male | female
 
-root_dir: /home/hocheol/inskin_ai/pipeline
+root_dir: /workspace/pipeline
 
 # MediaPipe FaceLandmarker
 face_landmarker_model: inference_models/face_landmarker.task

@@ -9,7 +9,6 @@
 # tail -f /dev/null: 컨테이너가 종료되지 않도록 유지하기 위해 /dev/null을 tail로 계속 읽음
 
 docker run --rm -dit \
-        -v /mnt/c/Users/hoche/Desktop/capstone:/home/hocheol/inskin_ai \
-        --name hobbang_effnet \
-        -e HOME=/mnt/c/Users/hoche/Desktop/capstone \
-        hobbang_effnet:latest
+        -v .:/workspace \
+        --name skin_inference \
+        skin_inference
