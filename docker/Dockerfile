@@ -12,9 +12,6 @@ RUN apt-get update && apt-get install -y \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-# 작업 디렉토리 설정
-WORKDIR /workspace
-
 # pipeline 실행에 필요한 패키지만 설치
 # tensorflow-cpu: tf.lite.Interpreter 제공 (GPU 드라이버 불필요)
 RUN pip install --no-cache-dir --upgrade pip && \
@@ -26,5 +23,16 @@ RUN pip install --no-cache-dir --upgrade pip && \
     pyyaml==6.0.3 \
     tqdm==4.67.1 \
     mediapipe==0.10.15
+
+# 사용자 그룹과 유저 생성
+# -m: 홈 디렉토리 생성, -u: 특정 UID 지정
+RUN groupadd -g 1000 user1 && useradd -r -u 1000 -g user1 user1
+
+# 작업 디렉토리 설정
+WORKDIR /workspace
+
+RUN chown user1:user1 /workspace
+
+USER user1
 
 CMD ["bash"]

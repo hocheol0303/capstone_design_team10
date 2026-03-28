@@ -1,0 +1,1 @@
+docker exec -it skin_inference bash
