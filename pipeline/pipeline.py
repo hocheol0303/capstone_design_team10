@@ -57,6 +57,11 @@ def _flatten_result(result: dict, filename: str = "") -> dict:
     row["pigment_left"]  = _f(pig.get("left"))
     row["pigment_right"] = _f(pig.get("right"))
 
+    # homogenity
+    hom = result.get("homogenity", {})
+    row["homogenity_radiance"] = _f(hom.get("radiance"))
+    row["homogenity_texture"]  = _f(hom.get("texture"))
+
     # wrinkle
     wrk = result.get("wrinkle", {})
     for sector in ["forehead", "right_eye", "left_eye", "nasolabial", "perioral", "right_vol", "left_vol"]:
@@ -141,6 +146,7 @@ class SkinPipeline:
             "age":            float | None
             "pigment":        {"left": float, "right": float}
             "wrinkle":        {sector: float | None, ...}
+            "homogenity":     {"radiance": float | None, "texture": float | None}
             "cheek_sagging":  {"right": float(0~50), "left": float(0~50), "total": float(0~100)}
             "chin_sagging":   {"right": float(0~50), "left": float(0~50), "total": float(0~100)}
             "valid_sagging":  bool
@@ -173,6 +179,9 @@ class SkinPipeline:
         print('\033[45mwrinkle 예측\033[0m')
         wrinkle = self._effnet.predict_wrinkle(crops["wrinkle_crops"])
 
+        print('\033[45mhomogenity 예측\033[0m')
+        homogenity = self._effnet.predict_homogenity(crops["age_crop"])
+
         # 볼처짐 / 턱처짐
         print('\033[45m--- Sagging ---\033[0m')
         sagging_result = {"cheek": {}, "chin": {}}
@@ -186,6 +195,7 @@ class SkinPipeline:
             "age":           age,
             "pigment":       pigment,
             "wrinkle":       wrinkle,
+            "homogenity":    homogenity,
             "cheek_sagging": sagging_result["cheek"],
             "chin_sagging":  sagging_result["chin"],
             "valid_sagging": crops["valid_sagging"],

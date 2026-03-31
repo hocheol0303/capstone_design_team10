@@ -5,9 +5,10 @@ TFLite 기반 EfficientNet 추론 모듈.
 
 모델별 특성
 -----------
-age_reg    : 단일 입력(face crop), 이중 출력 [male_pred, female_pred] shape (1,1) 각각
-pigment_reg: 단일 입력(cheek crop), 단일 출력 shape (1,1)
-wrinkle_reg: 이중 입력 [image_input, sector_input(int32)], 단일 출력 shape (1,1)
+age_reg       : 단일 입력(face crop), 이중 출력 [male_pred, female_pred] shape (1,1) 각각
+pigment_reg   : 단일 입력(cheek crop), 단일 출력 shape (1,1)
+wrinkle_reg   : 이중 입력 [image_input, sector_input(int32)], 단일 출력 shape (1,1)
+homogenity_reg: 단일 입력(face crop), 이중 출력 [rad_out, tex_out] shape (1,1) 각각
 
 입력 전처리
 -----------
@@ -64,25 +65,38 @@ class EffNetPredictor:
 
         tflite_cfg = config['tflite']
 
-        pigment_path = str(Path(config.get('root_dir', '.')) / tflite_cfg['pigment']['model'])
-        wrinkle_path = str(Path(config.get('root_dir', '.')) / tflite_cfg['wrinkle']['model'])
-        age_path = str(Path(config.get('root_dir', '.')) / tflite_cfg['age']['model'])
-    
-        # age 1개 + pigment 2개(left/right) + wrinkle 7개(sector별) 병렬 로드
-        n_workers = 1 + 2 + len(SECTORS)
+        pigment_path    = str(Path(config.get('root_dir', '.')) / tflite_cfg['pigment']['model'])
+        wrinkle_path    = str(Path(config.get('root_dir', '.')) / tflite_cfg['wrinkle']['model'])
+        age_path        = str(Path(config.get('root_dir', '.')) / tflite_cfg['age']['model'])
+        homogenity_path = str(Path(config.get('root_dir', '.')) / tflite_cfg['homogenity']['model'])
+
+        # age 1개 + pigment 2개(left/right) + wrinkle 7개(sector별) + homogenity 1개 병렬 로드
+        n_workers = 1 + 2 + len(SECTORS) + 1
         with ThreadPoolExecutor(max_workers=n_workers) as ex:
             f_age            = ex.submit(_load_interpreter, age_path)
             f_pig_left       = ex.submit(_load_interpreter, pigment_path)
             f_pig_right      = ex.submit(_load_interpreter, pigment_path)
             f_wrinkle_list   = [ex.submit(_load_interpreter, wrinkle_path) for _ in SECTORS]
+            f_homogenity     = ex.submit(_load_interpreter, homogenity_path)
 
             self._age_interp         = f_age.result()
             self._pigment_interps    = {"left": f_pig_left.result(), "right": f_pig_right.result()}
             self._wrinkle_interps    = {s: f.result() for s, f in zip(SECTORS, f_wrinkle_list)}
+            self._homogenity_interp  = f_homogenity.result()
 
-        self._age_input_size     = tuple(tflite_cfg['age']['input_size'])
-        self._pigment_input_size = tuple(tflite_cfg['pigment']['input_size'])
-        self._wrinkle_input_size = tuple(tflite_cfg['wrinkle']['input_size'])
+        self._age_input_size        = tuple(tflite_cfg['age']['input_size'])
+        self._pigment_input_size    = tuple(tflite_cfg['pigment']['input_size'])
+        self._wrinkle_input_size    = tuple(tflite_cfg['wrinkle']['input_size'])
+        self._homogenity_input_size = tuple(tflite_cfg['homogenity']['input_size'])
+
+        # homogenity 출력 인덱스 매핑: :0 → rad_out, :1 → tex_out
+        self._homogenity_output_map = {}
+        for detail in self._homogenity_interp.get_output_details():
+            name = detail['name']
+            if 'rad_out' in name or name.endswith(':0'):
+                self._homogenity_output_map['rad_out'] = detail['index']
+            elif 'tex_out' in name or name.endswith(':1'):
+                self._homogenity_output_map['tex_out'] = detail['index']
 
         # wrinkle 입력 텐서 순서 확인 (image vs sector) — 첫 번째 인스턴스 기준
         _sample_wrinkle = next(iter(self._wrinkle_interps.values()))
@@ -150,6 +164,31 @@ class EffNetPredictor:
         with ThreadPoolExecutor(max_workers=2) as ex:
             futures = {side: ex.submit(_infer, side, crop) for side, crop in pigment_crops.items()}
             return {side: f.result()[1] for side, f in futures.items()}
+
+    # ── 균질도 예측 ───────────────────────────────────────────────────────────
+
+    def predict_homogenity(self, face_crop: np.ndarray) -> dict:
+        """
+        Parameters
+        ----------
+        face_crop : (H, W, 3) RGB uint8
+
+        Returns
+        -------
+        {"radiance": float | None, "texture": float | None}
+        """
+        img = _resize_and_to_float(face_crop, self._homogenity_input_size)
+        if img is None:
+            return {"radiance": None, "texture": None}
+
+        interp = self._homogenity_interp
+        input_details = interp.get_input_details()
+        interp.set_tensor(input_details[0]['index'], img)
+        interp.invoke()
+
+        rad_score = float(interp.get_tensor(self._homogenity_output_map['rad_out'])[0, 0])
+        tex_score = float(interp.get_tensor(self._homogenity_output_map['tex_out'])[0, 0])
+        return {"radiance": rad_score, "texture": tex_score}
 
     # ── 주름 예측 ─────────────────────────────────────────────────────────────
 

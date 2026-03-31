@@ -4,7 +4,7 @@
 
 gender: male   # male | female
 
-root_dir: /workspace/pipeline
+root_dir: /home/hocheol/inskin_ai/pipeline
 
 # MediaPipe FaceLandmarker
 face_landmarker_model: inference_models/face_landmarker.task
@@ -19,6 +19,9 @@ tflite:
     input_size: [384, 384]
   wrinkle:
     model: inference_models/wrinkle_reg/epoch70_260306_124838.tflite
+    input_size: [384, 384]
+  homogenity:
+    model: inference_models/homogenity_reg/epoch70_260320_182001.tflite
     input_size: [384, 384]
 
 # 볼처짐·턱처짐 보정 파라미터 JSON
