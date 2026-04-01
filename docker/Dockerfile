@@ -3,6 +3,7 @@ FROM python:3.11-slim
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONUNBUFFERED=1
+ENV PIP_CACHE_DIR=/workspace/.cache/pip
 
 # OpenCV / MediaPipe 런타임 의존성만 설치
 RUN apt-get update && apt-get install -y \
@@ -26,7 +27,7 @@ RUN pip install --no-cache-dir --upgrade pip && \
 
 # 사용자 그룹과 유저 생성
 # -m: 홈 디렉토리 생성, -u: 특정 UID 지정
-RUN groupadd -g 1000 user1 && useradd -r -u 1000 -g user1 user1
+RUN groupadd -g 1000 user1 && useradd -m -u 1000 -g user1 user1
 
 # 작업 디렉토리 설정
 WORKDIR /workspace
