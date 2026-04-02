@@ -27,7 +27,7 @@ def load_env_file(env_path: Path) -> None:
 
 load_env_file(Path(__file__).resolve().parent / ".env")
 
-DEFAULT_EXCEL_PATH = Path(__file__).resolve().parent / "data" / "맞춤솔루션출력조건_250912.xlsx"
+DEFAULT_EXCEL_PATH = Path(__file__).resolve().parent / "data" / "맞춤솔루션출력조건_260318.xlsx"
 EXCEL_PATH = os.getenv("EXCEL_PATH", str(DEFAULT_EXCEL_PATH))
 OPENAI_EMBED_MODEL = os.getenv("OPENAI_EMBED_MODEL", "text-embedding-3-small")
 OPENAI_EMBED_DIMENSIONS = int(os.getenv("OPENAI_EMBED_DIMENSIONS", "1536"))
@@ -36,10 +36,14 @@ EMBED_MIN_BATCH_SIZE = int(os.getenv("EMBED_MIN_BATCH_SIZE", "4"))
 EMBED_MAX_RETRIES = int(os.getenv("EMBED_MAX_RETRIES", "8"))
 EMBED_RETRY_BASE_SECONDS = float(os.getenv("EMBED_RETRY_BASE_SECONDS", "1.0"))
 
-NEO4J_URI = os.getenv("NEO4J_URI", "neo4j+s://c995342e.databases.neo4j.io")
-NEO4J_USERNAME = os.getenv("NEO4J_USERNAME", "c995342e")
+NEO4J_URI = os.getenv("NEO4J_URI", "")
+NEO4J_USERNAME = os.getenv("NEO4J_USERNAME", "")
 NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD", "")
 NEO4J_DATABASE = os.getenv("NEO4J_DATABASE", "").strip()
+if None in {NEO4J_URI, NEO4J_USERNAME, NEO4J_PASSWORD}:
+    raise EnvironmentError("NEO4J_URI, NEO4J_USERNAME, NEO4J_PASSWORD 환경변수를 모두 설정해주세요.")
+else:
+    print(f"\033[42mNeo4j 연결 정보: URI={NEO4J_URI}, USERNAME={NEO4J_USERNAME}, DATABASE={NEO4J_DATABASE or '기본'}\033[0m")
 
 FEATURE_SHEETS = [
     "색소",
@@ -49,7 +53,7 @@ FEATURE_SHEETS = [
     "입가·턱주름",
     "리프팅(윤곽)",
     "리프팅(탄력)",
-    "스킨부스터",
+    "스킨부스터 (new)",
     "볼꺼짐",
 ]
 
@@ -178,7 +182,7 @@ def parse_feature_sheet(ws) -> List[FeatureRule]:
             clinician_desc = row[5]
             raw_condition = condition_1
 
-        if not age_group or not code:
+        if not output_text and not customer_desc:
             continue
 
         rule_id = f"feature::{slugify(ws.title)}::{slugify(age_group)}::{slugify(code)}::{row_idx}"
@@ -268,9 +272,11 @@ def load_rules_from_excel(excel_path: str) -> Tuple[List[FeatureRule], List[Comb
         feature_rules.extend(parse_feature_sheet(wb[sheet_name]))
 
     if COMBINED_SHEET not in wb.sheetnames:
-        raise ValueError(f"시트가 없습니다: {COMBINED_SHEET}")
-
-    combined_rules = parse_combined_sheet(wb[COMBINED_SHEET])
+        # raise ValueError(f"시트가 없습니다: {COMBINED_SHEET}")
+        print(f"경고: 시트가 없습니다: {COMBINED_SHEET} - 종합 규칙이 로드되지 않습니다")
+        combined_rules = []
+    else:
+        combined_rules = parse_combined_sheet(wb[COMBINED_SHEET])
     return feature_rules, combined_rules
 
 
@@ -508,12 +514,14 @@ class AuraUploader:
     def debug_counts(self) -> Dict[str, int]:
         with self._session() as session:
             feature_count = session.run("MATCH (n:FeatureRule) RETURN count(n) AS c").single()["c"]
-            combined_count = session.run("MATCH (n:CombinedRule) RETURN count(n) AS c").single()["c"]
-            rel_count = session.run("MATCH ()-[r:USES_CODE]->() RETURN count(r) AS c").single()["c"]
+            # combined_count = session.run("MATCH (n:CombinedRule) RETURN count(n) AS c").single()["c"]
+            # rel_count = session.run("MATCH ()-[r:USES_CODE]->() RETURN count(r) AS c").single()["c"]
+            # chunk_count = session.run("MATCH (n:TreatmentChunk) RETURN count(n) AS c").single()["c"]
         return {
             "feature_rules": feature_count,
-            "combined_rules": combined_count,
-            "uses_code_relationships": rel_count,
+            # "combined_rules": combined_count,
+            # "uses_code_relationships": rel_count,
+            # "treatment_chunks": chunk_count,
         }
 
 
@@ -557,19 +565,19 @@ def main() -> None:
         print("[2/6] Neo4j 연결 확인 완료")
 
         embedder = Embedder(model=OPENAI_EMBED_MODEL, dimensions=OPENAI_EMBED_DIMENSIONS)
-        feature_vectors = embedder.embed_texts([r.embedding_text for r in feature_rules], batch_size=EMBED_BATCH_SIZE)
-        combined_vectors = embedder.embed_texts([r.embedding_text for r in combined_rules], batch_size=EMBED_BATCH_SIZE)
+        feature_vectors = embedder.embed_texts([r.customer_desc for r in feature_rules], batch_size=EMBED_BATCH_SIZE)
+        # combined_vectors = embedder.embed_texts([r.embedding_text for r in combined_rules], batch_size=EMBED_BATCH_SIZE)
         print("[3/6] 임베딩 생성 완료")
 
         uploader.setup_schema(OPENAI_EMBED_DIMENSIONS)
         print("[4/6] 제약조건/벡터 인덱스 생성 완료")
 
         uploader.upload_feature_rules(feature_rules, feature_vectors)
-        uploader.upload_combined_rules(combined_rules, combined_vectors)
+        # uploader.upload_combined_rules(combined_rules, combined_vectors)
         print("[5/6] 노드 업로드 완료")
 
-        uploader.create_relationships()
-        print("[6/6] 관계 생성 완료")
+        # uploader.create_relationships()
+        # print("[6/6] 관계 생성 완료")
 
         counts = uploader.debug_counts()
         print("업로드 결과:")
