@@ -551,7 +551,7 @@ def main() -> None:
     excel_path = validate_inputs(EXCEL_PATH)
 
     feature_rules, combined_rules = load_rules_from_excel(excel_path)
-    print(f"[1/5] 엑셀 파싱 완료: feature_rules={len(feature_rules)}, combined_rules={len(combined_rules)}")
+    print(f"[1/6] 엑셀 파싱 완료: feature_rules={len(feature_rules)}, combined_rules={len(combined_rules)}")
 
     uploader = AuraUploader(
         uri=NEO4J_URI,
