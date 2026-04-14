@@ -134,11 +134,12 @@ class EffNetPredictor:
         interp.set_tensor(input_details[0]['index'], img)
         interp.invoke()
 
-        # 출력: [male_head, female_head], 각 shape (1, 1)
-        if self._gender == 'male':
-            pred = interp.get_tensor(self._age_output_details[0]['index'])
-        else:
-            pred = interp.get_tensor(self._age_output_details[1]['index'])
+        # 출력은 접미사로 판단
+        for detail in self._age_output_details:
+            if self._gender == 'male' and detail['name'].endswith(':0'):
+                pred = interp.get_tensor(detail['index'])
+            elif self._gender == 'female' and detail['name'].endswith(':1'):
+                pred = interp.get_tensor(detail['index'])
 
         return float(pred[0, 0])
 

@@ -23,6 +23,8 @@ import argparse
 from pathlib import Path
 from datetime import datetime
 
+start = datetime.now()
+
 import yaml
 import numpy as np
 import pandas as pd
@@ -292,3 +294,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+finish = datetime.now()
+print(f"총 실행 시간: {finish - start}")
