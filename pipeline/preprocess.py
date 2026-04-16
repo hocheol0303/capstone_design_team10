@@ -139,7 +139,7 @@ def _bgr_to_mp_image(bgr: np.ndarray) -> mp.Image:
     return mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
 
 
-def _compute_rotation(rgb, coords, landmarks) -> tuple:
+def _compute_rotation(bgr, coords, landmarks) -> tuple:
     """
     얼굴 랜드마크 기준으로 이미지와 coords를 동일한 중심(cx, cy)으로 회전.
 
@@ -147,7 +147,7 @@ def _compute_rotation(rgb, coords, landmarks) -> tuple:
     -------
     (rotated_rgb, rotated_coords)
     """
-    h, w = rgb.shape[:2]
+    h, w = bgr.shape[:2]
     left_eye  = _get_coord(landmarks, 33,  w, h)
     right_eye = _get_coord(landmarks, 263, w, h)
     cx, cy = _get_coord(landmarks, 1, w, h)
@@ -156,7 +156,7 @@ def _compute_rotation(rgb, coords, landmarks) -> tuple:
     rotated_coords = _rotate_points(coords, (cx, cy), angle_deg)
 
     M = cv2.getRotationMatrix2D((cx, cy), angle_deg, 1.0)
-    rotated_rgb = cv2.warpAffine(rgb, M, (w, h),
+    rotated_rgb = cv2.warpAffine(bgr, M, (w, h),
                                  flags=cv2.INTER_LINEAR,
                                  borderMode=cv2.BORDER_CONSTANT,
                                  borderValue=(0, 0, 0))
@@ -164,17 +164,17 @@ def _compute_rotation(rgb, coords, landmarks) -> tuple:
     return rotated_rgb, rotated_coords
 
 
-def _apply_skin_mask(rgb: np.ndarray, coords) -> np.ndarray:
+def _apply_skin_mask(bgr: np.ndarray, coords) -> np.ndarray:
     """
     비피부 마스킹: face oval 외부 제거 + 눈/눈썹/입술 제거.
-    rgb와 coords는 동일한 좌표계여야 함 (둘 다 회전됐거나 둘 다 원본).
+    bgr와 coords는 동일한 좌표계여야 함 (둘 다 회전됐거나 둘 다 원본).
     """
-    h, w = rgb.shape[:2]
+    h, w = bgr.shape[:2]
 
     face_oval_pts = np.array([coords[i] for i in _FACE_OVAL], np.int32)
     mask_face = np.zeros((h, w), dtype=np.uint8)
     cv2.fillPoly(mask_face, [face_oval_pts], 255)
-    masked = cv2.bitwise_and(rgb, rgb, mask=mask_face)
+    masked = cv2.bitwise_and(bgr, bgr, mask=mask_face)
 
     for region in [_LEFT_EYE, _RIGHT_EYE, _LEFT_BROW, _RIGHT_BROW]:
         pts = np.array([coords[i] for i in region], np.int32)
@@ -232,6 +232,8 @@ def _make_wrinkle_crops(rgb: np.ndarray, coords) -> dict:
     None이 포함될 수 있음 (nasolabial, perioral box 미검출 시).
     반환 key: WRINKLE_SECTORS 순서와 동일
     """
+    r = coords
+    masked = rgb
 
     # forehead
     pt10, pt8 = coords[10], coords[8]
@@ -400,22 +402,25 @@ class FacePreprocessor:
         R = np.asarray(result.facial_transformation_matrixes[0][:3, :3])
         yaw, roll, pitch = _rot2euler(R)
         landmarks = result.face_landmarks[0]
-        rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+        # rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
 
-        h, w = rgb.shape[:2]
+        h, w = bgr.shape[:2]
         
         coords = np.array([_get_coord(landmarks, i, w, h) for i in range(len(landmarks))], np.int32)
 
         if apply_rotation:
-            rgb, coords = _compute_rotation(rgb, coords, landmarks)
+            input_bgr, coords = _compute_rotation(bgr, coords, landmarks)
+        else:
+            input_bgr = bgr
 
         if apply_masking:
-            input_rgb = _apply_skin_mask(rgb, coords)
+            input_bgr = _apply_skin_mask(input_bgr, coords)
         else:
-            input_rgb = rgb
+            input_bgr = input_bgr
         
 
-        masked_bgr = cv2.cvtColor(input_rgb, cv2.COLOR_RGB2BGR)
+        input_rgb = cv2.cvtColor(input_bgr, cv2.COLOR_BGR2RGB)
+
 
         # 각 crop 생성 (이미 회전·마스킹된 input_rgb와 coords 사용)
         age_crop      = _make_age_crop(input_rgb, coords)
