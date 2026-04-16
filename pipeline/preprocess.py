@@ -53,6 +53,14 @@ WRINKLE_SECTORS = ["forehead", "right_eye", "left_eye", "nasolabial", "perioral"
 _SAGGING_TARGET_SIZE = 1024
 _SAGGING_ANGLE_THRESH = 0.1   # |yaw|, |pitch| 필터 (rad)
 
+# ── 디버그 토글 ───────────────────────────────────────────────────────────────
+# 주석 처리로 True/False 전환
+_DEBUG_APPLY_MASKING  = True    # 비피부 마스킹 적용
+# _DEBUG_APPLY_MASKING  = False  # 비피부 마스킹 미적용
+
+_DEBUG_APPLY_ROTATION = True    # 얼굴 정렬 회전 적용
+# _DEBUG_APPLY_ROTATION = False  # 얼굴 정렬 회전 미적용
+
 
 # ── 기하 유틸 ─────────────────────────────────────────────────────────────────
 
@@ -131,58 +139,78 @@ def _bgr_to_mp_image(bgr: np.ndarray) -> mp.Image:
     return mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
 
 
-# ── Age crop ──────────────────────────────────────────────────────────────────
-
-def _make_age_crop(rgb: np.ndarray, landmarks) -> np.ndarray:
+def _compute_rotation(bgr, coords, landmarks) -> tuple:
     """
-    눈/눈썹/입술 마스킹 + face_oval bounding-box 크롭.
-    landmarks: FaceLandmarker result.face_landmarks[0]
-    """
-    h, w = rgb.shape[:2]
-    coords = np.array([_get_coord(landmarks, i, w, h) for i in range(len(landmarks))], np.int32)
+    얼굴 랜드마크 기준으로 이미지와 coords를 동일한 중심(cx, cy)으로 회전.
 
-    left_eye_c  = _get_coord(landmarks, 33,  w, h)
-    right_eye_c = _get_coord(landmarks, 263, w, h)
+    Returns
+    -------
+    (rotated_rgb, rotated_coords)
+    """
+    h, w = bgr.shape[:2]
+    left_eye  = _get_coord(landmarks, 33,  w, h)
+    right_eye = _get_coord(landmarks, 263, w, h)
     cx, cy = _get_coord(landmarks, 1, w, h)
-    angle_deg = math.degrees(math.atan2(
-        right_eye_c[1] - left_eye_c[1],
-        right_eye_c[0] - left_eye_c[0],
-    ))
 
-    M_rot = cv2.getRotationMatrix2D((cx, cy), angle_deg, 1.0)
-    rotated = cv2.warpAffine(rgb, M_rot, (w, h))
-    r_coords = _rotate_points(coords, (cx, cy), angle_deg)
+    angle_deg = math.degrees(math.atan2(right_eye[1] - left_eye[1], right_eye[0] - left_eye[0]))
+    rotated_coords = _rotate_points(coords, (cx, cy), angle_deg)
 
-    # 마스킹
-    masked = rotated.copy()
+    M = cv2.getRotationMatrix2D((cx, cy), angle_deg, 1.0)
+    rotated_rgb = cv2.warpAffine(bgr, M, (w, h),
+                                 flags=cv2.INTER_LINEAR,
+                                 borderMode=cv2.BORDER_CONSTANT,
+                                 borderValue=(0, 0, 0))
+
+    return rotated_rgb, rotated_coords
+
+
+def _apply_skin_mask(bgr: np.ndarray, coords) -> np.ndarray:
+    """
+    비피부 마스킹: face oval 외부 제거 + 눈/눈썹/입술 제거.
+    bgr와 coords는 동일한 좌표계여야 함 (둘 다 회전됐거나 둘 다 원본).
+    """
+    h, w = bgr.shape[:2]
+
+    face_oval_pts = np.array([coords[i] for i in _FACE_OVAL], np.int32)
+    mask_face = np.zeros((h, w), dtype=np.uint8)
+    cv2.fillPoly(mask_face, [face_oval_pts], 255)
+    masked = cv2.bitwise_and(bgr, bgr, mask=mask_face)
+
     for region in [_LEFT_EYE, _RIGHT_EYE, _LEFT_BROW, _RIGHT_BROW]:
-        pts = np.array([r_coords[i] for i in region], np.int32)
+        pts = np.array([coords[i] for i in region], np.int32)
         if len(pts) >= 3:
             cv2.fillPoly(masked, [pts], (0, 0, 0))
-    lip_pts = np.array([r_coords[i] for i in (_UPPER_LIP + _LOWER_LIP[::-1])], np.int32)
+
+    lip_pts = np.array([coords[i] for i in (_UPPER_LIP + _LOWER_LIP[::-1])], np.int32)
     cv2.fillPoly(masked, [lip_pts], (0, 0, 0))
 
-    # face_oval bounding box crop
-    face_pts = np.array([r_coords[i] for i in _FACE_OVAL], np.int32)
+    return masked
+
+
+# ── Age crop ──────────────────────────────────────────────────────────────────
+
+def _make_age_crop(rgb: np.ndarray, coords) -> np.ndarray:
+    """
+    face_oval bounding-box 크롭.
+    입력 rgb는 이미 회전·마스킹이 적용된 이미지여야 함.
+    """
+    face_pts = np.array([coords[i] for i in _FACE_OVAL], np.int32)
     x, y, cw, ch = cv2.boundingRect(face_pts)
     x, y = max(0, x), max(0, y)
-    return masked[y:y + ch, x:x + cw]
+    return rgb[y:y + ch, x:x + cw]
 
 
 # ── Pigment crop ───────────────────────────────────────────────────────────────
 
-def _make_pigment_crops(rgb: np.ndarray, landmarks):
+def _make_pigment_crops(rgb: np.ndarray, coords):
     """
     landmarks 0, 34 (right cheek), 0, 264 (left cheek) 기준 크롭.
+    입력 rgb는 이미 회전·마스킹이 적용된 이미지여야 함.
     반환: {"left": ndarray, "right": ndarray}
     """
-    h, w = rgb.shape[:2]
-    def to_px(lm):
-        return int(lm.x * w), int(lm.y * h)
-
-    p0   = to_px(landmarks[0])
-    p34  = to_px(landmarks[34])
-    p264 = to_px(landmarks[264])
+    p0   = coords[0]
+    p34  = coords[34]
+    p264 = coords[264]
 
     def _rect_crop(pa, pb):
         x1, y1 = min(pa[0], pb[0]), min(pa[1], pb[1])
@@ -197,35 +225,15 @@ def _make_pigment_crops(rgb: np.ndarray, landmarks):
 
 # ── Wrinkle sector crops ───────────────────────────────────────────────────────
 
-def _make_wrinkle_crops(rgb: np.ndarray, landmarks) -> dict:
+def _make_wrinkle_crops(rgb: np.ndarray, coords) -> dict:
     """
     7개 wrinkle sector crop 생성.
+    입력 rgb는 이미 회전·마스킹이 적용된 이미지여야 함.
     None이 포함될 수 있음 (nasolabial, perioral box 미검출 시).
     반환 key: WRINKLE_SECTORS 순서와 동일
     """
-    h, w = rgb.shape[:2]
-    coords = np.array([_get_coord(landmarks, i, w, h) for i in range(len(landmarks))], np.int32)
-
-    left_eye_c  = _get_coord(landmarks, 33,  w, h)
-    right_eye_c = _get_coord(landmarks, 263, w, h)
-    cx, cy = _get_coord(landmarks, 1, w, h)
-    angle_deg = math.degrees(math.atan2(
-        right_eye_c[1] - left_eye_c[1],
-        right_eye_c[0] - left_eye_c[0],
-    ))
-
-    M_rot = cv2.getRotationMatrix2D((cx, cy), angle_deg, 1.0)
-    rotated = cv2.warpAffine(rgb, M_rot, (w, h))
-    r = _rotate_points(coords, (cx, cy), angle_deg)
-
-    # 마스킹 (눈/눈썹/입술)
-    masked = rotated.copy()
-    for region in [_LEFT_EYE, _RIGHT_EYE, _LEFT_BROW, _RIGHT_BROW]:
-        pts = np.array([r[i] for i in region], np.int32)
-        if len(pts) >= 3:
-            cv2.fillPoly(masked, [pts], (0, 0, 0))
-    lip_pts = np.array([r[i] for i in (_UPPER_LIP + _LOWER_LIP[::-1])], np.int32)
-    cv2.fillPoly(masked, [lip_pts], (0, 0, 0))
+    r = coords
+    masked = rgb
 
     # forehead
     pt10, pt8 = r[10], r[8]
@@ -359,12 +367,18 @@ class FacePreprocessor:
     def __init__(self, face_landmarker_model: str):
         self._landmarker = _init_landmarker(face_landmarker_model)
 
-    def process(self, image_source) -> dict | None:
+    def process(self, image_source,
+                apply_masking: bool = _DEBUG_APPLY_MASKING,
+                apply_rotation: bool = _DEBUG_APPLY_ROTATION) -> dict | None:
         """
         Parameters
         ----------
         image_source : str | Path | np.ndarray
             이미지 파일 경로 또는 BGR numpy array.
+        apply_masking : bool
+            비피부 마스킹 적용 여부. 기본값은 파일 상단 _DEBUG_APPLY_MASKING.
+        apply_rotation : bool
+            얼굴 정렬 회전 적용 여부. 기본값은 파일 상단 _DEBUG_APPLY_ROTATION.
 
         Returns
         -------
@@ -388,12 +402,30 @@ class FacePreprocessor:
         R = np.asarray(result.facial_transformation_matrixes[0][:3, :3])
         yaw, roll, pitch = _rot2euler(R)
         landmarks = result.face_landmarks[0]
-        rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+        # rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
 
-        # 각 crop 생성
-        age_crop      = _make_age_crop(rgb, landmarks)
-        pigment_crops = _make_pigment_crops(rgb, landmarks)
-        wrinkle_crops = _make_wrinkle_crops(rgb, landmarks)
+        h, w = bgr.shape[:2]
+        
+        coords = np.array([_get_coord(landmarks, i, w, h) for i in range(len(landmarks))], np.int32)
+
+        if apply_rotation:
+            input_bgr, coords = _compute_rotation(bgr, coords, landmarks)
+        else:
+            input_bgr = bgr
+
+        if apply_masking:
+            input_bgr = _apply_skin_mask(input_bgr, coords)
+        else:
+            input_bgr = input_bgr
+        
+
+        input_rgb = cv2.cvtColor(input_bgr, cv2.COLOR_BGR2RGB)
+
+
+        # 각 crop 생성 (이미 회전·마스킹된 input_rgb와 coords 사용)
+        age_crop      = _make_age_crop(input_rgb, coords)
+        pigment_crops = _make_pigment_crops(input_rgb, coords)
+        wrinkle_crops = _make_wrinkle_crops(input_rgb, coords)
 
         # sagging 전용 preprocessing (168-152 정렬 + 2차 랜드마크)
         sagging_rgb, yaw_s, pitch_s, valid_sagging = _make_sagging_image(bgr, self._landmarker)
