@@ -428,7 +428,7 @@ class FacePreprocessor:
         wrinkle_crops = _make_wrinkle_crops(input_rgb, coords)
 
         # sagging 전용 preprocessing (168-152 정렬 + 2차 랜드마크)
-        sagging_rgb, yaw_s, pitch_s, valid_sagging = _make_sagging_image(masked_bgr, self._landmarker)
+        sagging_rgb, yaw_s, pitch_s, valid_sagging = _make_sagging_image(input_bgr, self._landmarker)
 
         return {
             "age_crop":      age_crop,
