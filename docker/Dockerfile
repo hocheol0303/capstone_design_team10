@@ -10,6 +10,7 @@ RUN apt-get update && apt-get install -y \
     libgl1 \
     libglib2.0-0 \
     libgomp1 \
+    tmux \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
@@ -23,11 +24,23 @@ RUN pip install --no-cache-dir --upgrade pip && \
     opencv-python-headless==4.10.0.84 \
     pyyaml==6.0.3 \
     tqdm==4.67.1 \
-    mediapipe==0.10.15
+    mediapipe==0.10.15 \
+    ipykernel==7.1.0 \
+    jupyter-server
+
+# beauty-agent (VLM ReAct agent) 의존성
+RUN pip install --no-cache-dir \
+    langchain>=0.2.0 \
+    langchain-openai>=0.1.0 \
+    langgraph>=0.1.0 \
+    python-dotenv>=1.0.0 \
+    requests>=2.31.0 \
+    pydantic>=2.0.0 \
+    langchain-google-genai>=0.1.0
 
 # 사용자 그룹과 유저 생성
 # -m: 홈 디렉토리 생성, -u: 특정 UID 지정
-RUN groupadd -g 1000 user1 && useradd -m -u 1000 -g user1 user1
+RUN groupadd -g 1000 user1 && useradd -m -u 1000 -g user1 -s /bin/bash user1
 
 # 작업 디렉토리 설정
 WORKDIR /workspace

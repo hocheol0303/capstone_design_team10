@@ -9,6 +9,7 @@
 # tail -f /dev/null: 컨테이너가 종료되지 않도록 유지하기 위해 /dev/null을 tail로 계속 읽음
 
 docker run --rm -dit \
+        -p 9000:8888 \
         -v .:/workspace \
         --name skin_inference \
         skin_inference
