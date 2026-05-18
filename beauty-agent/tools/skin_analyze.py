@@ -85,8 +85,10 @@ def _flatten(result: dict) -> dict:
     }
 
 
-def _compute_top_concerns(raw_scores: dict, k: int = 3) -> list[dict]:
-    """좌/우 등 대칭 점수를 부위별로 평균낸 뒤, 점수가 낮은(=상태가 심각한) 순서로 k개 추출."""
+def aggregate_regions(raw_scores: dict) -> list[dict]:
+    """좌/우 등 대칭 점수를 부위별로 평균내 10개 region 점수 리스트로 반환.
+    점수가 낮은(=상태가 심각한) 순서로 정렬.
+    """
     def avg(*keys):
         vals = [raw_scores.get(key) for key in keys if raw_scores.get(key) is not None]
         return sum(vals) / len(vals) if vals else None
@@ -107,7 +109,12 @@ def _compute_top_concerns(raw_scores: dict, k: int = 3) -> list[dict]:
         {"region": en, "region_ko": ko, "score": round(score, 2)}
         for en, ko, score in candidates if score is not None
     ]
-    return sorted(regions, key=lambda r: r["score"])[:k]
+    return sorted(regions, key=lambda r: r["score"])
+
+
+def _compute_top_concerns(raw_scores: dict, k: int = 3) -> list[dict]:
+    """집계 후 가장 점수가 낮은(상태 심각한) k개 부위."""
+    return aggregate_regions(raw_scores)[:k]
 
 
 def _make_tool_message(content: dict, tool_call_id: str) -> ToolMessage:

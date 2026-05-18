@@ -36,7 +36,9 @@ RUN pip install --no-cache-dir \
     langgraph>=0.2.0 \
     python-dotenv>=1.0.0 \
     requests>=2.31.0 \
-    pydantic>=2.0.0 
+    pydantic>=2.0.0 \
+    neo4j>=5.0.0 \
+    openpyxl>=3.1.0
 
 # 사용자 그룹과 유저 생성
 # -m: 홈 디렉토리 생성, -u: 특정 UID 지정

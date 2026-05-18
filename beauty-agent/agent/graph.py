@@ -16,6 +16,7 @@ from langgraph.checkpoint.memory import InMemorySaver
 from agent.prompts import SYSTEM_PROMPT
 from agent.state import BeautyAgentState
 from config import AI_MODEL
+from tools.recommend_treatment import recommend_treatment
 from tools.skin_analyze import skin_analyze
 
 
@@ -29,7 +30,7 @@ def build_agent(checkpointer=None):
         model=AI_MODEL,
         temperature=0,
     )
-    tools = [skin_analyze]
+    tools = [skin_analyze, recommend_treatment]
     return create_agent(
         model=llm,
         tools=tools,
@@ -91,6 +92,10 @@ class ChatSession:
     @property
     def top_concerns(self):
         return self._snapshot().get("top_concerns")
+
+    @property
+    def db_recommendations(self):
+        return self._snapshot().get("db_recommendations")
 
     def stream(self, user_text: str) -> Iterator[str]:
         """LLM 토큰을 발생 즉시 yield. 같은 메시지 안의 빈 chunk(tool_call만 있는 경우)는 건너뜀."""
