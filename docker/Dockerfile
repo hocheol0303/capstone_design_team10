@@ -32,6 +32,7 @@ RUN pip install --no-cache-dir --upgrade pip && \
 RUN pip install --no-cache-dir \
     langchain>=0.3.0 \
     langchain-google-genai>=2.0.0 \
+    langchain-openai>=0.1.0 \
     langgraph>=0.2.0 \
     python-dotenv>=1.0.0 \
     requests>=2.31.0 \
