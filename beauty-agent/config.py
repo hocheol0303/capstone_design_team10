@@ -1,19 +1,14 @@
 import os
+from pathlib import Path
+
 from dotenv import load_dotenv
 
-load_dotenv()
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+load_dotenv(PROJECT_ROOT / ".env")
 
-root_dir = os.path.dirname(os.path.dirname(__file__))
-openai_api_key_path = os.path.join(root_dir, 'no_track', 'openai_api_key.txt')
+# init_chat_model(model=AI_MODEL, model_provider=AI_MODEL_PROVIDER)
+AI_MODEL = "google_genai:gemini-3-flash-preview"
 
-with open(openai_api_key_path, 'r') as f:
-    OPENAI_API_KEY = f.read().strip()
-
-OPENAI_MODEL = "gpt-4.1-mini"
-
-# PUBMED_BASE_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
-# PUBMED_API_KEY = os.getenv("PUBMED_API_KEY", "")
-
-USE_MOCK_VISION = True
-USE_MOCK_PUBMED = False
-USE_MOCK_SCENARIO = int(os.getenv("USE_MOCK_SCENARIO", "1"))
+PIPELINE_DIR = PROJECT_ROOT / "pipeline"
+PIPELINE_CONFIG = PIPELINE_DIR / "config.yaml"
+DEFAULT_GENDER = "female"

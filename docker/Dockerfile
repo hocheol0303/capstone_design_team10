@@ -30,13 +30,12 @@ RUN pip install --no-cache-dir --upgrade pip && \
 
 # beauty-agent (VLM ReAct agent) 의존성
 RUN pip install --no-cache-dir \
-    langchain>=0.2.0 \
-    langchain-openai>=0.1.0 \
-    langgraph>=0.1.0 \
+    langchain>=0.3.0 \
+    langchain-google-genai>=2.0.0 \
+    langgraph>=0.2.0 \
     python-dotenv>=1.0.0 \
     requests>=2.31.0 \
-    pydantic>=2.0.0 \
-    langchain-google-genai>=0.1.0
+    pydantic>=2.0.0 
 
 # 사용자 그룹과 유저 생성
 # -m: 홈 디렉토리 생성, -u: 특정 UID 지정

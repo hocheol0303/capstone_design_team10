@@ -1,107 +1,119 @@
+"""실제 SkinPipeline을 호출해 얼굴 이미지에서 raw 0~100 점수를 추출하는 tool.
+
+Phase 1 설계:
+- severity(severe/moderate/mild) 변환은 이 tool에서 하지 않는다.
+- 호출자(LLM)에 raw 값을 그대로 노출 → 검색/설명 시점에 변환.
+- 가중치가 큰 SkinPipeline 인스턴스는 gender별로 1회만 초기화하고 캐싱.
+"""
+import importlib.util
+import sys
+from pathlib import Path
+
+import yaml
 from langchain_core.tools import tool
 
-from config import USE_MOCK_SCENARIO, USE_MOCK_VISION
+from config import DEFAULT_GENDER, PIPELINE_CONFIG, PIPELINE_DIR, PROJECT_ROOT
 
-_MOCK_SCENARIO_1 = {
-    "pigment_left":       78,
-    "pigment_right":      84,
-    "wrinkle_forehead":   18,
-    "wrinkle_nasolabial": 22,
-    "wrinkle_right_eye":  45,
-    "wrinkle_left_eye":   48,
-    "wrinkle_perioral":   35,
-    "sagging_jawline":    55,
-    "volume_loss":        40,
-}
-
-_MOCK_SCENARIO_2 = _MOCK_SCENARIO_1
-
-_MOCK_SCENARIO_3 = {
-    "pigment_left":       22,
-    "pigment_right":      25,
-    "wrinkle_forehead":   72,
-    "wrinkle_nasolabial": 68,
-    "wrinkle_right_eye":  55,
-    "wrinkle_left_eye":   58,
-    "wrinkle_perioral":   45,
-    "sagging_jawline":    80,
-    "volume_loss":        62,
-}
-
-_MOCK_REGISTRY = {
-    1: _MOCK_SCENARIO_1,
-    2: _MOCK_SCENARIO_2,
-    3: _MOCK_SCENARIO_3,
-}
-
-_REGION_LABEL_KO = {
-    "pigmentation":      "색소침착",
-    "forehead_wrinkle":  "이마주름",
-    "nasolabial_fold":   "팔자주름",
-    "eye_wrinkle":       "눈가주름",
-    "perioral_wrinkle":  "입가주름",
-    "jawline_sagging":   "턱선 처짐",
-    "volume_loss":       "볼륨 손실",
-}
+# pipeline.py 내부의 `from preprocess import ...` 가 동작하도록 pipeline/ 디렉토리를 sys.path에 추가
+if str(PIPELINE_DIR) not in sys.path:
+    sys.path.insert(0, str(PIPELINE_DIR))
 
 
-def score_to_severity(score: float) -> str:
-    if score <= 30:
-        return "severe"
-    elif score <= 80:
-        return "moderate"
-    else:
-        return "mild"
-
-
-def _aggregate(raw: dict) -> dict:
-    pigmentation = (raw["pigment_left"] + raw["pigment_right"]) / 2
-    eye_wrinkle = (raw["wrinkle_right_eye"] + raw["wrinkle_left_eye"]) / 2
-    return {
-        "pigmentation":     pigmentation,
-        "forehead_wrinkle": raw["wrinkle_forehead"],
-        "nasolabial_fold":  raw["wrinkle_nasolabial"],
-        "eye_wrinkle":      eye_wrinkle,
-        "perioral_wrinkle": raw["wrinkle_perioral"],
-        "jawline_sagging":  raw["sagging_jawline"],
-        "volume_loss":      raw["volume_loss"],
-    }
-
-
-def _build_output(raw_scores: dict) -> dict:
-    aggregated = _aggregate(raw_scores)
-    severity = {region: score_to_severity(s) for region, s in aggregated.items()}
-
-    severity_rank = {"severe": 0, "moderate": 1, "mild": 2}
-    primary_concerns = [
-        f"{region} ({sev})"
-        for region, sev in sorted(severity.items(), key=lambda kv: severity_rank[kv[1]])
-        if sev == "severe"
-    ]
-
-    severity_summary = ", ".join(
-        f"{_REGION_LABEL_KO[region]}({sev})" for region, sev in severity.items()
+def _load_skin_pipeline_class():
+    """pipeline/pipeline.py를 파일 경로로 직접 로드해 namespace 충돌을 피한다."""
+    spec = importlib.util.spec_from_file_location(
+        "_skin_pipeline_module", str(PIPELINE_DIR / "pipeline.py")
     )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.SkinPipeline
 
+
+def _runtime_config_path() -> Path:
+    """config.yaml의 root_dir을 호스트의 실제 pipeline/ 경로로 덮어쓴 사본을 만든다."""
+    with open(PIPELINE_CONFIG, encoding="utf-8") as f:
+        cfg = yaml.safe_load(f)
+    cfg["root_dir"] = str(PIPELINE_DIR)
+
+    cache_dir = PROJECT_ROOT / ".cache"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    out = cache_dir / "pipeline_runtime_config.yaml"
+    with open(out, "w", encoding="utf-8") as f:
+        yaml.safe_dump(cfg, f, allow_unicode=True)
+    return out
+
+
+_pipeline_cache: dict = {}
+
+
+def _get_pipeline(gender: str):
+    gender = gender.lower()
+    if gender not in _pipeline_cache:
+        SkinPipeline = _load_skin_pipeline_class()
+        _pipeline_cache[gender] = SkinPipeline(
+            config_path=_runtime_config_path(), gender=gender
+        )
+    return _pipeline_cache[gender]
+
+
+def _flatten(result: dict) -> dict:
+    pigment = result.get("pigment") or {}
+    wrinkle = result.get("wrinkle") or {}
+    homogenity = result.get("homogenity") or {}
+    cheek = result.get("cheek_sagging") or {}
+    chin = result.get("chin_sagging") or {}
     return {
-        "severity": severity,
-        "primary_concerns": primary_concerns,
-        "severity_summary": severity_summary,
+        "pigment_left":         pigment.get("left"),
+        "pigment_right":        pigment.get("right"),
+        "wrinkle_forehead":     wrinkle.get("forehead"),
+        "wrinkle_right_eye":    wrinkle.get("right_eye"),
+        "wrinkle_left_eye":     wrinkle.get("left_eye"),
+        "wrinkle_nasolabial":   wrinkle.get("nasolabial"),
+        "wrinkle_perioral":     wrinkle.get("perioral"),
+        "wrinkle_right_vol":    wrinkle.get("right_vol"),
+        "wrinkle_left_vol":     wrinkle.get("left_vol"),
+        "homogenity_radiance":  homogenity.get("radiance"),
+        "homogenity_texture":   homogenity.get("texture"),
+        "cheek_sagging_total":  cheek.get("total"),
+        "chin_sagging_total":   chin.get("total"),
     }
 
 
 @tool
-def skin_analyze(image: str) -> dict:
-    """얼굴 이미지를 분석하여 피부 상태를 부위별 중증도로 산출합니다 (severe/moderate/mild). 이미지가 입력되면 반드시 첫 번째로 호출하세요.
+def skin_analyze(image_path: str, gender: str | None = None) -> dict:
+    """얼굴 이미지를 분석해 부위별 raw 점수(0~100, 낮을수록 심각)를 반환합니다.
+    같은 이미지에 대해 한 번만 호출하세요. 중증도 변환은 별도 판단으로 수행합니다.
+
+    피부 나이(age) 예측은 성별이 있어야만 신뢰할 수 있습니다.
+    gender가 주어지지 않으면 age는 반환되지 않으며(age=null, age_note 동봉),
+    다른 점수들은 fallback 성별(female)로 산출됩니다.
 
     Args:
-        image: Base64 encoded 얼굴 이미지 또는 이미지 경로.
+        image_path: 얼굴 이미지 파일 경로 (절대 또는 작업 디렉토리 기준 상대 경로).
+        gender: 'male' 또는 'female'. 미지정 시 age는 산출되지 않음.
 
     Returns:
-        부위별 severity, primary_concerns, severity_summary를 담은 dict.
+        - image_path, gender_input, age, age_note, valid_sagging
+        - raw_scores: 부위별 0~100 dict
+        - error: 얼굴 미검출 또는 파이프라인 실패 시
     """
-    if USE_MOCK_VISION:
-        raw_scores = _MOCK_REGISTRY.get(USE_MOCK_SCENARIO, _MOCK_SCENARIO_1)
-        return _build_output(raw_scores)
+    gender_provided = bool(gender)
+    effective_gender = (gender or DEFAULT_GENDER).lower()
 
-    raise NotImplementedError("실제 비전 모델 연동은 추후 Phase에서 구현합니다.")
+    pipe = _get_pipeline(effective_gender)
+    try:
+        result = pipe.predict_single(image_path)
+    except Exception as e:
+        return {"error": f"파이프라인 실행 실패: {e}", "image_path": image_path}
+
+    if result is None:
+        return {"error": "얼굴을 검출하지 못했습니다.", "image_path": image_path}
+
+    return {
+        "image_path":      image_path,
+        "gender_input":    gender,
+        "age":             result.get("age") if gender_provided else None,
+        "age_note":        None if gender_provided else "성별 미지정으로 피부 나이는 산출하지 않음. 사용자에게 성별을 확인 후 재호출 권장.",
+        "valid_sagging":   result.get("valid_sagging"),
+        "raw_scores":      _flatten(result),
+    }
