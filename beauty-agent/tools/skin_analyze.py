@@ -4,13 +4,19 @@ Phase 1 설계:
 - severity(severe/moderate/mild) 변환은 이 tool에서 하지 않는다.
 - 호출자(LLM)에 raw 값을 그대로 노출 → 검색/설명 시점에 변환.
 - 가중치가 큰 SkinPipeline 인스턴스는 gender별로 1회만 초기화하고 캐싱.
+- Tool은 Command를 반환해 messages 외에 커스텀 state(skin_scores, top_concerns)를 함께 갱신한다.
 """
 import importlib.util
+import json
 import sys
 from pathlib import Path
+from typing import Annotated, Optional
 
 import yaml
+from langchain_core.messages import ToolMessage
 from langchain_core.tools import tool
+from langchain_core.tools.base import InjectedToolCallId
+from langgraph.types import Command
 
 from config import DEFAULT_GENDER, PIPELINE_CONFIG, PIPELINE_DIR, PROJECT_ROOT
 
@@ -79,8 +85,44 @@ def _flatten(result: dict) -> dict:
     }
 
 
+def _compute_top_concerns(raw_scores: dict, k: int = 3) -> list[dict]:
+    """좌/우 등 대칭 점수를 부위별로 평균낸 뒤, 점수가 낮은(=상태가 심각한) 순서로 k개 추출."""
+    def avg(*keys):
+        vals = [raw_scores.get(key) for key in keys if raw_scores.get(key) is not None]
+        return sum(vals) / len(vals) if vals else None
+
+    candidates = [
+        ("pigmentation",        "색소침착",        avg("pigment_left", "pigment_right")),
+        ("forehead_wrinkle",    "이마주름",        avg("wrinkle_forehead")),
+        ("eye_wrinkle",         "눈가주름",        avg("wrinkle_right_eye", "wrinkle_left_eye")),
+        ("nasolabial_fold",     "팔자주름",        avg("wrinkle_nasolabial")),
+        ("perioral_wrinkle",    "입가주름",        avg("wrinkle_perioral")),
+        ("volume_wrinkle",      "볼륨 주름",       avg("wrinkle_right_vol", "wrinkle_left_vol")),
+        ("homogenity_radiance", "피부 광채 균일도", avg("homogenity_radiance")),
+        ("homogenity_texture",  "피부결 균일도",    avg("homogenity_texture")),
+        ("cheek_sagging",       "볼 처짐",         avg("cheek_sagging_total")),
+        ("chin_sagging",        "턱 처짐",         avg("chin_sagging_total")),
+    ]
+    regions = [
+        {"region": en, "region_ko": ko, "score": round(score, 2)}
+        for en, ko, score in candidates if score is not None
+    ]
+    return sorted(regions, key=lambda r: r["score"])[:k]
+
+
+def _make_tool_message(content: dict, tool_call_id: str) -> ToolMessage:
+    return ToolMessage(
+        content=json.dumps(content, ensure_ascii=False),
+        tool_call_id=tool_call_id,
+    )
+
+
 @tool
-def skin_analyze(image_path: str, gender: str | None = None) -> dict:
+def skin_analyze(
+    image_path: str,
+    gender: Optional[str] = None,
+    tool_call_id: Annotated[str, InjectedToolCallId] = "",
+) -> Command:
     """얼굴 이미지를 분석해 부위별 raw 점수(0~100, 낮을수록 심각)를 반환합니다.
     같은 이미지에 대해 한 번만 호출하세요. 중증도 변환은 별도 판단으로 수행합니다.
 
@@ -93,9 +135,7 @@ def skin_analyze(image_path: str, gender: str | None = None) -> dict:
         gender: 'male' 또는 'female'. 미지정 시 age는 산출되지 않음.
 
     Returns:
-        - image_path, gender_input, age, age_note, valid_sagging
-        - raw_scores: 부위별 0~100 dict
-        - error: 얼굴 미검출 또는 파이프라인 실패 시
+        Command(update={...}) — state의 skin_scores/top_concerns 갱신 + ToolMessage 삽입.
     """
     gender_provided = bool(gender)
     effective_gender = (gender or DEFAULT_GENDER).lower()
@@ -104,16 +144,30 @@ def skin_analyze(image_path: str, gender: str | None = None) -> dict:
     try:
         result = pipe.predict_single(image_path)
     except Exception as e:
-        return {"error": f"파이프라인 실행 실패: {e}", "image_path": image_path}
+        err = {"error": f"파이프라인 실행 실패: {e}", "image_path": image_path}
+        return Command(update={"messages": [_make_tool_message(err, tool_call_id)]})
 
     if result is None:
-        return {"error": "얼굴을 검출하지 못했습니다.", "image_path": image_path}
+        err = {"error": "얼굴을 검출하지 못했습니다.", "image_path": image_path}
+        return Command(update={"messages": [_make_tool_message(err, tool_call_id)]})
 
-    return {
-        "image_path":      image_path,
-        "gender_input":    gender,
-        "age":             result.get("age") if gender_provided else None,
-        "age_note":        None if gender_provided else "성별 미지정으로 피부 나이는 산출하지 않음. 사용자에게 성별을 확인 후 재호출 권장.",
-        "valid_sagging":   result.get("valid_sagging"),
-        "raw_scores":      _flatten(result),
+    raw_scores = _flatten(result)
+    top_concerns = _compute_top_concerns(raw_scores)
+
+    skin_scores = {
+        "image_path":    image_path,
+        "gender_input":  gender,
+        "age":           result.get("age") if gender_provided else None,
+        "age_note":      None if gender_provided else "성별 미지정으로 피부 나이는 산출하지 않음. 사용자에게 성별을 확인 후 재호출 권장.",
+        "valid_sagging": result.get("valid_sagging"),
+        "raw_scores":    raw_scores,
     }
+
+    # LLM이 ToolMessage에서 직접 볼 내용(top_concerns 포함)
+    payload_for_llm = {**skin_scores, "top_concerns": top_concerns}
+
+    return Command(update={
+        "skin_scores":   skin_scores,
+        "top_concerns":  top_concerns,
+        "messages":      [_make_tool_message(payload_for_llm, tool_call_id)],
+    })
