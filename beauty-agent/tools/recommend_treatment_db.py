@@ -167,7 +167,7 @@ def _build_query(region_ko: str, score: float, age: Optional[float]) -> str:
 
 
 @tool
-def recommend_treatment(
+def recommend_treatment_db(
     state: Annotated[dict, InjectedState],
     tool_call_id: Annotated[str, InjectedToolCallId] = "",
 ) -> Command:

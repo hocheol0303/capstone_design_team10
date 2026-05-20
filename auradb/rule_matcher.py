@@ -9,7 +9,7 @@ DB row의 condition_1/2/3 텍스트를 raw 점수로 결정론적으로 평가�
 (c) prefixed range    예: "턱처짐 35-64점", "볼꺼짐 54점 이하"
 (d) 가중합 + 범위     예: "볼처짐 + 팔자주름 + 0.5*입가·턱주름 115-250점"
 
-호출자(recommend_treatment)는 feature_name과 raw_scores(13개 키 dict)와
+호출자(recommend_treatment_db)는 feature_name과 raw_scores(13개 키 dict)와
 DB의 row 목록을 넘기면, match_feature_row가 어떤 row가 맞는지 결정한다.
 """
 from __future__ import annotations
