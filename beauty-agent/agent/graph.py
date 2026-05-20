@@ -16,7 +16,7 @@ from langgraph.checkpoint.memory import InMemorySaver
 from agent.prompts import SYSTEM_PROMPT
 from agent.state import BeautyAgentState
 from config import AI_MODEL
-from tools.recommend_treatment import recommend_treatment
+from tools.recommend_treatment_db import recommend_treatment
 from tools.skin_analyze import skin_analyze
 
 

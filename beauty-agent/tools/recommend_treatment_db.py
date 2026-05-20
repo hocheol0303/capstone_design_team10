@@ -85,31 +85,72 @@ def _make_tool_message(content, tool_call_id: str) -> ToolMessage:
         content = json.dumps(content, ensure_ascii=False)
     return ToolMessage(content=content, tool_call_id=tool_call_id)
 
-# LLM한테 노출할 자연어 요약 생성
+def _group_recommendations(recs: list[dict]) -> list[dict]:
+    """feature_name 기준으로 묶고, 각 묶음의 대표 항목은 가장 낮은 score를 사용한다."""
+    grouped: dict[str, dict] = {}
+
+    for rec in recs:
+        feature_name = rec.get("feature_name") or "미분류"
+        group = grouped.setdefault(feature_name, {
+            "feature_name": feature_name,
+            "regions": [],
+            "best": rec,
+        })
+        group["regions"].append(rec)
+        if rec["score"] < group["best"]["score"]:
+            group["best"] = rec
+
+    return sorted(
+        grouped.values(),
+        key=lambda g: (g["best"]["score"], g["feature_name"]),
+    )
+
+
+def _format_region_list(regions: list[dict]) -> str:
+    ordered = sorted(regions, key=lambda r: (r["score"], r["region_ko"]))
+    return ", ".join(f"{r['region_ko']} {r['score']:.1f}점" for r in ordered)
+
+
+def _format_group_block(group: dict, include_rank: bool = False, rank: int | None = None) -> list[str]:
+    best = group["best"]
+    feature_name = group["feature_name"]
+    regions_text = _format_region_list(group["regions"])
+    code = best.get("code", "") or ""
+    treatment = (best.get("treatment") or "").strip()
+    desc = (best.get("customer_desc") or "").replace("\n", " ").strip()
+
+    header = f"- {feature_name} [{regions_text}]"
+    if include_rank and rank is not None:
+        header = f"{rank}. {feature_name} [{regions_text}]"
+
+    lines = [header]
+    if code.endswith("_0"):
+        lines.append("  · 관리 불필요")
+    else:
+        lines.append(f"  · 권장 시술: {code}: {treatment}")
+    if desc:
+        lines.append(f"  · 안내: {desc}")
+    return lines
+
+
 def _format_recommendations(recs: list[dict], errors: list[dict]) -> str:
-    """LLM에 노출할 자연어 요약. similarity/query_used/clinician_desc/matched_age_group 등 내부 값은 제외."""
+    """LLM에 노출할 자연어 요약. similarity/query_used/clinician_desc/matched_age_group 등 내부 값은 제외한다."""
     if not recs:
         body = "조회된 추천 결과가 없습니다."
     else:
-        recs_sorted = sorted(recs, key=lambda r: r["score"])
-        no_need, recommended = [], []
-        for r in recs_sorted:
-            code = r.get("code", "") or ""
-            (no_need if code.endswith("_0") else recommended).append(r)
+        grouped = _group_recommendations(recs)
+        top3 = grouped[:3]
 
-        lines = ["AuraDB FeatureRule 조회 결과 (부위 10개):"]
-        if recommended:
-            lines.append("\n[권장 시술]")
-            for r in recommended:
-                desc = (r.get("customer_desc") or "").replace("\n", " ").strip()
-                lines.append(
-                    f"- {r['region_ko']} ({r['score']:.1f}점) → {r['code']}: {r['treatment']}"
-                )
-                if desc:
-                    lines.append(f"  · 안내: {desc}")
-        if no_need:
-            tags = ", ".join(f"{r['region_ko']} ({r['code']})" for r in no_need)
-            lines.append(f"\n[관리 불필요] {tags}")
+        lines = ["AuraDB FeatureRule 조회 결과"]
+        lines.append("\n[부위/카테고리별 권장 시술]")
+        for group in grouped:
+            lines.extend(_format_group_block(group))
+
+        if top3:
+            lines.append("\n[추천 시술 - 심각도가 높은 카테고리 3개]")
+            for idx, group in enumerate(top3, start=1):
+                lines.extend(_format_group_block(group, include_rank=True, rank=idx))
+
         body = "\n".join(lines)
 
     if errors:
@@ -130,8 +171,8 @@ def recommend_treatment(
     state: Annotated[dict, InjectedState],
     tool_call_id: Annotated[str, InjectedToolCallId] = "",
 ) -> Command:
-    """skin_analyze로 도출된 raw_scores를 받아 10개 부위 전체에 대해 AuraDB FeatureRule에서
-    적절한 시술(연결 코드 + 출력값)을 조회합니다.
+    """skin_analyze로 도출된 raw_scores를 받아 AuraDB FeatureRule에서 적절한 시술을 조회합니다.
+    feature_name 기준으로 묶어서 안내하고, 그중 진단 점수가 가장 낮은 카테고리 3개를 별도 추천합니다.
     반드시 skin_analyze를 먼저 호출한 뒤 사용하세요. 추가 인자는 받지 않으며 state를 그대로 활용합니다.
 
     Returns:
@@ -166,7 +207,7 @@ def recommend_treatment(
 
     age = skin_scores.get("age")  # None이면 age_group 미사용
 
-    # top_concerns(top3)가 아니라 전체 10개 region 조회
+    # 전체 10개 region을 조회하되, 출력은 feature_name 기준으로 묶어서 정리
     all_regions = aggregate_regions(raw_scores)
 
     db_recommendations = []
