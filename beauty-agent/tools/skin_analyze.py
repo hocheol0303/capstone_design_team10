@@ -94,16 +94,16 @@ def aggregate_regions(raw_scores: dict) -> list[dict]:
         return sum(vals) / len(vals) if vals else None
 
     candidates = [
-        ("pigmentation",        "색소침착",        avg("pigment_left", "pigment_right")),
-        ("forehead_wrinkle",    "이마주름",        avg("wrinkle_forehead")),
-        ("eye_wrinkle",         "눈가주름",        avg("wrinkle_right_eye", "wrinkle_left_eye")),
+        ("pigmentation",        "색소",            avg("pigment_left", "pigment_right")),
+        ("forehead_wrinkle",    "이마미간주름",     avg("wrinkle_forehead")),
+        ("eye_wrinkle",         "눈가앞광대주름",   avg("wrinkle_right_eye", "wrinkle_left_eye")),
         ("nasolabial_fold",     "팔자주름",        avg("wrinkle_nasolabial")),
         ("perioral_wrinkle",    "입가주름",        avg("wrinkle_perioral")),
-        ("volume_wrinkle",      "볼륨 주름",       avg("wrinkle_right_vol", "wrinkle_left_vol")),
-        ("homogenity_radiance", "피부 광채 균일도", avg("homogenity_radiance")),
-        ("homogenity_texture",  "피부결 균일도",    avg("homogenity_texture")),
-        ("cheek_sagging",       "볼 처짐",         avg("cheek_sagging_total")),
-        ("chin_sagging",        "턱 처짐",         avg("chin_sagging_total")),
+        ("volume_wrinkle",      "볼꺼짐",          avg("wrinkle_right_vol", "wrinkle_left_vol")),
+        ("homogenity_radiance", "광채",            avg("homogenity_radiance")),
+        ("homogenity_texture",  "거칠기",          avg("homogenity_texture")),
+        ("cheek_sagging",       "볼처짐",          avg("cheek_sagging_total")),
+        ("chin_sagging",        "턱처짐",          avg("chin_sagging_total")),
     ]
     regions = [
         {"region": en, "region_ko": ko, "score": round(score, 2)}
@@ -117,11 +117,39 @@ def _compute_top_concerns(raw_scores: dict, k: int = 3) -> list[dict]:
     return aggregate_regions(raw_scores)[:k]
 
 
-def _make_tool_message(content: dict, tool_call_id: str) -> ToolMessage:
-    return ToolMessage(
-        content=json.dumps(content, ensure_ascii=False),
-        tool_call_id=tool_call_id,
-    )
+def _make_tool_message(content, tool_call_id: str) -> ToolMessage:
+    """문자열은 그대로, dict는 JSON으로 직렬화해 ToolMessage 생성."""
+    if not isinstance(content, str):
+        content = json.dumps(content, ensure_ascii=False)
+    return ToolMessage(content=content, tool_call_id=tool_call_id)
+
+
+# LLM한테 넘겨줄 자연어 요약 생성
+def _format_skin_summary(
+    aggregated: list[dict],
+    top_concerns: list[dict],
+    age: float | None,
+    gender: str | None,
+    age_note: str | None,
+) -> str:
+    """LLM에 전달할 자연어 요약. raw 점수 13개는 노출하지 않고 부위별 평균 + Top3만."""
+    lines = ["피부 진단 결과 (점수 0~100, 낮을수록 심각):"]
+    for r in aggregated:
+        lines.append(f"- {r['region_ko']}: {r['score']:.1f}점")
+
+    if top_concerns:
+        worst = ", ".join(
+            f"{c['region_ko']} {c['score']:.1f}점" for c in top_concerns
+        )
+        lines.append(f"\n점수가 가장 낮은 상위 3개 부위(=가장 심각): {worst}")
+
+    if age is not None:
+        gender_str = f" (성별 {gender})" if gender else ""
+        lines.append(f"추정 피부 연령: {age:.0f}세{gender_str}")
+    elif age_note:
+        lines.append(f"\n참고: {age_note}")
+
+    return "\n".join(lines)
 
 
 @tool
@@ -159,22 +187,26 @@ def skin_analyze(
         return Command(update={"messages": [_make_tool_message(err, tool_call_id)]})
 
     raw_scores = _flatten(result)
-    top_concerns = _compute_top_concerns(raw_scores)
+    aggregated = aggregate_regions(raw_scores)
+    top_concerns = aggregated[:3]
+
+    age_value = result.get("age") if gender_provided else None
+    age_note = None if gender_provided else "성별 미지정으로 피부 나이는 산출하지 않음. 사용자에게 성별을 확인 후 재호출 권장."
 
     skin_scores = {
         "image_path":    image_path,
         "gender_input":  gender,
-        "age":           result.get("age") if gender_provided else None,
-        "age_note":      None if gender_provided else "성별 미지정으로 피부 나이는 산출하지 않음. 사용자에게 성별을 확인 후 재호출 권장.",
+        "age":           age_value,
+        "age_note":      age_note,
         "valid_sagging": result.get("valid_sagging"),
         "raw_scores":    raw_scores,
     }
 
-    # LLM이 ToolMessage에서 직접 볼 내용(top_concerns 포함)
-    payload_for_llm = {**skin_scores, "top_concerns": top_concerns}
+    # LLM이 보는 ToolMessage는 자연어 요약. 상세 raw_scores/top_concerns는 state에서 그대로 유지.
+    summary = _format_skin_summary(aggregated, top_concerns, age_value, gender, age_note)
 
     return Command(update={
         "skin_scores":   skin_scores,
         "top_concerns":  top_concerns,
-        "messages":      [_make_tool_message(payload_for_llm, tool_call_id)],
+        "messages":      [_make_tool_message(summary, tool_call_id)],
     })

@@ -23,7 +23,8 @@ def chat() -> None:
     session = ChatSession()
     while True:
         try:
-            text = input("\n\033[92mYou>\033[0m ").strip()
+            print("\n\033[92mYou>\033[0m ")
+            text = input().strip()
         except (EOFError, KeyboardInterrupt):
             print()
             break
@@ -32,7 +33,7 @@ def chat() -> None:
         if text.lower() in {"exit", "quit"}:
             break
 
-        print("\n\033[94mAgent>\033[0m ", end="", flush=True)
+        print("\n\033[94mAgent>\n\033[0m", end="", flush=True)
         for token in session.stream(text):
             print(token, end="", flush=True)
         print()

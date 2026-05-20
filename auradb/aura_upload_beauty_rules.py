@@ -25,9 +25,9 @@ def load_env_file(env_path: Path) -> None:
         os.environ.setdefault(key, value)
 
 
-load_env_file(Path(__file__).resolve().parent / ".env")
+load_env_file(Path(__file__).resolve().parent.parent / ".env")
 
-DEFAULT_EXCEL_PATH = Path(__file__).resolve().parent / "data" / "맞춤솔루션출력조건_260318.xlsx"
+DEFAULT_EXCEL_PATH = Path(__file__).resolve().parent / "data" / "mapping_table_tmp.xlsx"
 EXCEL_PATH = os.getenv("EXCEL_PATH", str(DEFAULT_EXCEL_PATH))
 OPENAI_EMBED_MODEL = os.getenv("OPENAI_EMBED_MODEL", "text-embedding-3-small")
 OPENAI_EMBED_DIMENSIONS = int(os.getenv("OPENAI_EMBED_DIMENSIONS", "1536"))
@@ -57,7 +57,7 @@ FEATURE_SHEETS = [
     "볼꺼짐",
 ]
 
-COMBINED_SHEET = "종합"
+COMBINED_SHEET = "dummy"
 
 
 @dataclass
@@ -154,14 +154,16 @@ def parse_feature_sheet(ws) -> List[FeatureRule]:
     headers = [clean_text(cell.value) for cell in ws[1]]
     rules: List[FeatureRule] = []
 
-    is_multi_condition = "1차 조건" in headers
+    is_three_condition = "1차 조건" in headers
+    is_skinbooster_two_condition = "광채" in headers and "거칠기" in headers
 
     for row_idx in range(2, ws.max_row + 1):
         row = [clean_text(ws.cell(row_idx, c).value) for c in range(1, ws.max_column + 1)]
         if not any(row):
             continue
 
-        if is_multi_condition:
+        if is_three_condition:
+            # [연령, 1차, 2차, 3차, 출력값, 연결 코드, 설명(고객용), Prompt 용]
             age_group = row[0]
             condition_1 = row[1]
             condition_2 = row[2]
@@ -169,9 +171,21 @@ def parse_feature_sheet(ws) -> List[FeatureRule]:
             output_text = row[4]
             code = row[5]
             customer_desc = row[6]
-            clinician_desc = row[7]
+            clinician_desc = row[7] if len(row) > 7 else ""
             raw_condition = " | ".join([x for x in [condition_1, condition_2, condition_3] if x and x != "없음"])
+        elif is_skinbooster_two_condition:
+            # [연령, 광채, 거칠기, 출력값, 연결 코드, 설명(고객용), Prompt 용, ...]
+            age_group = row[0]
+            condition_1 = row[1]   # 광채
+            condition_2 = row[2]   # 거칠기
+            condition_3 = None
+            output_text = row[3]
+            code = row[4]
+            customer_desc = row[5]
+            clinician_desc = row[6] if len(row) > 6 else ""
+            raw_condition = f"광채={condition_1} | 거칠기={condition_2}"
         else:
+            # [연령, 조건값, 출력값, 연결 코드, 설명(고객용), Prompt 용]
             age_group = row[0]
             condition_1 = row[1]
             condition_2 = None
@@ -179,7 +193,7 @@ def parse_feature_sheet(ws) -> List[FeatureRule]:
             output_text = row[2]
             code = row[3]
             customer_desc = row[4]
-            clinician_desc = row[5]
+            clinician_desc = row[5] if len(row) > 5 else ""
             raw_condition = condition_1
 
         if not output_text and not customer_desc:
@@ -370,6 +384,18 @@ class AuraUploader:
             raise ConnectionError(
                 "Neo4j 연결에 실패했습니다. NEO4J_URI, NEO4J_USERNAME, NEO4J_PASSWORD, NEO4J_DATABASE 값을 확인해주세요."
             ) from exc
+
+    def wipe_existing(self) -> None:
+        """기존 FeatureRule/CombinedRule 노드와 벡터 인덱스를 모두 제거.
+
+        misaligned key(예: 스킨부스터의 code 컬럼이 출력값 문자열이었던 잔여물)가
+        MERGE로 덮어쓰이지 않으므로, 재적재 전에 한 번 청소한다.
+        """
+        with self._session() as session:
+            session.run("DROP INDEX feature_rule_embedding_idx IF EXISTS")
+            session.run("DROP INDEX combined_rule_embedding_idx IF EXISTS")
+            session.run("MATCH (n:FeatureRule) DETACH DELETE n")
+            session.run("MATCH (n:CombinedRule) DETACH DELETE n")
 
     def setup_schema(self, embedding_dimensions: int) -> None:
         with self._session() as session:
@@ -563,6 +589,9 @@ def main() -> None:
     try:
         uploader.verify_connectivity()
         print("[2/6] Neo4j 연결 확인 완료")
+
+        uploader.wipe_existing()
+        print("[2.5/6] 기존 FeatureRule/CombinedRule 노드 및 벡터 인덱스 제거 완료")
 
         embedder = Embedder(model=OPENAI_EMBED_MODEL, dimensions=OPENAI_EMBED_DIMENSIONS)
         feature_vectors = embedder.embed_texts([r.customer_desc for r in feature_rules], batch_size=EMBED_BATCH_SIZE)

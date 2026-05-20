@@ -85,6 +85,38 @@ def _make_tool_message(content, tool_call_id: str) -> ToolMessage:
         content = json.dumps(content, ensure_ascii=False)
     return ToolMessage(content=content, tool_call_id=tool_call_id)
 
+# LLM한테 노출할 자연어 요약 생성
+def _format_recommendations(recs: list[dict], errors: list[dict]) -> str:
+    """LLM에 노출할 자연어 요약. similarity/query_used/clinician_desc/matched_age_group 등 내부 값은 제외."""
+    if not recs:
+        body = "조회된 추천 결과가 없습니다."
+    else:
+        recs_sorted = sorted(recs, key=lambda r: r["score"])
+        no_need, recommended = [], []
+        for r in recs_sorted:
+            code = r.get("code", "") or ""
+            (no_need if code.endswith("_0") else recommended).append(r)
+
+        lines = ["AuraDB FeatureRule 조회 결과 (부위 10개):"]
+        if recommended:
+            lines.append("\n[권장 시술]")
+            for r in recommended:
+                desc = (r.get("customer_desc") or "").replace("\n", " ").strip()
+                lines.append(
+                    f"- {r['region_ko']} ({r['score']:.1f}점) → {r['code']}: {r['treatment']}"
+                )
+                if desc:
+                    lines.append(f"  · 안내: {desc}")
+        if no_need:
+            tags = ", ".join(f"{r['region_ko']} ({r['code']})" for r in no_need)
+            lines.append(f"\n[관리 불필요] {tags}")
+        body = "\n".join(lines)
+
+    if errors:
+        err_str = "; ".join(f"{e.get('region')}: {e.get('reason')}" for e in errors)
+        body += f"\n\n[조회 오류] {err_str}"
+    return body
+
 
 def _build_query(region_ko: str, score: float, age: Optional[float]) -> str:
     """customer_desc 임베딩과 매칭되도록 자연어 쿼리 구성."""
@@ -120,6 +152,12 @@ def recommend_treatment(
         )
         Connect_DB = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(Connect_DB)
+
+        spec_rm = importlib.util.spec_from_file_location(
+            "_rule_matcher", str(AURADB_DIR / "rule_matcher.py")
+        )
+        rule_matcher = importlib.util.module_from_spec(spec_rm)
+        spec_rm.loader.exec_module(rule_matcher)
     except Exception as e:
         return Command(update={"messages": [_make_tool_message(
             {"error": f"auradb 모듈 로드 실패: {e}"},
@@ -157,28 +195,43 @@ def recommend_treatment(
             age_group = _best_age_group(age, cands) if cands else None
 
         query_text = _build_query(region_ko, score, age)
+
+        # rule-based 매칭 (1차)
         try:
-            matches = Connect_DB.search_feature_by_name(
-                feature_name=feature_name,
-                query_text=query_text,
-                age_group=age_group,
-                top_k=1,
-            )
+            rows = Connect_DB.fetch_feature_rows(feature_name, age_group=age_group)
         except Exception as e:
             errors.append({"region": region, "reason": f"DB 조회 실패: {e}"})
             continue
 
-        if not matches:
+        m = rule_matcher.match_feature_row(feature_name, age_group, raw_scores, rows)
+        matched_by = "rule"
+
+        # fallback: rule이 못 찾으면 vector 유사도
+        if m is None:
+            try:
+                matches = Connect_DB.search_feature_by_name(
+                    feature_name=feature_name,
+                    query_text=query_text,
+                    age_group=age_group,
+                    top_k=1,
+                )
+                m = matches[0] if matches else None
+                matched_by = "vector_fallback" if m else None
+            except Exception as e:
+                errors.append({"region": region, "reason": f"vector fallback 실패: {e}"})
+                continue
+
+        if not m:
             errors.append({"region": region, "reason": "조회 결과 없음"})
             continue
 
-        m = matches[0]
         db_recommendations.append({
             "region":            region,
             "region_ko":         region_ko,
             "score":             score,
             "feature_name":      feature_name,
             "matched_age_group": m.get("age_group"),
+            "matched_by":        matched_by,
             "code":              m.get("code"),
             "treatment":         m.get("output_text"),
             "customer_desc":     m.get("customer_desc"),
@@ -187,11 +240,10 @@ def recommend_treatment(
             "query_used":        query_text,
         })
 
-    payload = {"db_recommendations": db_recommendations}
-    if errors:
-        payload["errors"] = errors
+    # LLM이 보는 ToolMessage는 정제된 자연어. 내부값(similarity/query_used 등)은 state에만 둠.
+    summary = _format_recommendations(db_recommendations, errors)
 
     return Command(update={
         "db_recommendations": db_recommendations,
-        "messages":           [_make_tool_message(payload, tool_call_id)],
+        "messages":           [_make_tool_message(summary, tool_call_id)],
     })
