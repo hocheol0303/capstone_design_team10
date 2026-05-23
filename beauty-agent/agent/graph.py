@@ -374,6 +374,7 @@ class ChatSession:
         """
         sent_tool_calls: set = set()
         sent_tool_msgs: set = set()
+        thought_prefixed = False
 
         try:
             for kind, payload in self.graph.stream(
@@ -387,6 +388,9 @@ class ChatSession:
                         continue  # updates에서 한 블록으로 처리
                     text = _extract_text(getattr(chunk, "content", None))
                     if text:
+                        if not thought_prefixed:
+                            yield "🧠 [Thought] "
+                            thought_prefixed = True
                         yield text
                 elif kind == "updates":
                     for _node_name, node_update in payload.items():
@@ -400,6 +404,7 @@ class ChatSession:
                                     sent_tool_calls.add(cid)
                                     args_str = _format_tool_args(call.get("args"))
                                     yield f"\n\n🔧 [Act] {call.get('name')}({args_str})\n"
+                                    thought_prefixed = False
                             elif isinstance(msg, ToolMessage):
                                 key = (msg.tool_call_id, id(msg))
                                 if key in sent_tool_msgs:
@@ -408,6 +413,7 @@ class ChatSession:
                                 content = _extract_text(msg.content)
                                 if content:
                                     yield f"\n📋 [Observe]\n{content}\n\n"
+                                    thought_prefixed = False
         except UnicodeEncodeError:
             yield _reinput_request_message()
         except Exception as exc:  # noqa: BLE001

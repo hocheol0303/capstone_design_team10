@@ -19,7 +19,7 @@ def chat() -> None:
     from agent.graph import ChatSession
 
     print("대화형 모드 시작. 'exit' 입력 시 종료.")
-    print("예) 이 사진 진단해줘. 성별은 여자, 경로: samples/028_data/0001/0001_01_F.jpg")
+    print("skin_analyze → recommend_treatment_db 순차 호출 예:\n이 사진을 보고 어떤 시술을 받을지 추천해줘. 성별은 여자, 경로: samples/028_data/0001/0001_01_F.jpg")
     session = ChatSession()
     while True:
         try:
