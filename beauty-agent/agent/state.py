@@ -28,18 +28,18 @@ class BeautyAgentState(MessagesState):
     observations: Annotated[List[str], operator.add]
 
     # ── 루프 가드 ────────────────────────────────────────────
-    iteration_count: int   # think 노드가 매번 +1
-    max_iterations:  int   # 도달 시 finish로 강제 분기
+    iteration_count: Annotated[int, "loop 횟수 명시"]   # think 노드가 매번 +1
+    max_iterations:  Annotated[int, "최대 loop 횟수"]   # 도달 시 finish로 강제 분기
 
     # ── 실행 컨텍스트 + 결과 ──────────────────────────────────
-    current_goal: str
-    final_answer: str
-    is_complete:  bool
+    current_goal: Annotated[str, "현재 달성하려는 목표"]
+    final_answer: Annotated[str, "최종 답변"]
+    is_complete:  Annotated[bool, "목표 달성 여부 (True면 finish로 분기)"]
 
     # ── 도메인 컨텍스트 (skin agent 전용) ─────────────────────
-    image_path:             str | None
-    gender:                 str | None
-    skin_scores:            dict | None
-    top_concerns:           list | None
-    db_recommendations:     list | None
-    pubmed_recommendations: list | None
+    image_path:             Annotated[str | None, "이미지 경로"]
+    gender:                 Annotated[str | None, "성별"]
+    skin_scores:            Annotated[dict | None, "피부 점수"]
+    top_concerns:           Annotated[list | None, "주요 관심사"]
+    db_recommendations:     Annotated[list | None, "데이터베이스 추천"]
+    pubmed_recommendations: Annotated[list | None, "PubMed 추천"]
