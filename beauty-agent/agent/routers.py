@@ -1,0 +1,57 @@
+"""Beauty agent LangGraph 라우팅 함수 모음.
+
+각 함수는 state를 읽고 다음 노드 이름(문자열)을 반환한다.
+"""
+from __future__ import annotations
+
+from langchain_core.messages import AIMessage
+
+from agent.helpers import (
+    DEFAULT_MAX_ITERATIONS,
+    _classify_intent,
+    _latest_human_message_text,
+)
+from agent.state import BeautyAgentState
+
+
+def route_after_think(state: BeautyAgentState) -> str:
+    """think이 tool_call을 발행했으면 act, 아니면 곧장 finish.
+
+    ToolNode가 tool_call 없는 메시지에서 에러를 낼 수 있어 안전 분기.
+    """
+    messages = state.get("messages") or []
+    if messages and isinstance(messages[-1], AIMessage) and messages[-1].tool_calls:
+        return "act"
+    return "finish"
+
+
+def should_continue(state: BeautyAgentState) -> str:
+    """observe 이후: 루프 계속 / 종료 결정.
+
+    - iteration_count가 max_iterations에 도달했으면 finish (loop guard).
+    - 그 외에는 think로 돌아가 LLM이 추가 행동 또는 최종 답변을 결정.
+    """
+    iter_count = state.get("iteration_count", 0)
+    max_iter = state.get("max_iterations", DEFAULT_MAX_ITERATIONS)
+    if iter_count >= max_iter:
+        return "finish"
+    return "think"
+
+
+def route_from_start(state: BeautyAgentState) -> str:
+    """첫 진입 분기.
+
+    - 사용자 메시지가 '최종 레포트 요청'으로 분류되면 데이터 충분 시 final_report,
+      부족 시 insufficient_response로 분기.
+    - 그 외에는 일반 ReAct 사이클(think) 시작.
+    """
+    latest = _latest_human_message_text(state.get("messages") or [])
+
+    if _classify_intent(latest) == "report":
+        has_diag = bool((state.get("skin_scores") or {}).get("raw_scores"))
+        has_db = bool(state.get("db_recommendations"))
+        has_pub = bool(state.get("pubmed_recommendations"))
+        if not has_diag or not (has_db or has_pub):
+            return "insufficient_response"
+        return "final_report"
+    return "think"
