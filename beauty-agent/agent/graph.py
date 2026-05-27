@@ -23,11 +23,11 @@ from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import END, START, StateGraph
 
 from agent.helpers import (
-    _extract_text,
-    _format_tool_args,
-    _parse_gender,
-    _parse_image_path,
-    _reinput_request_message,
+    extract_text,
+    format_tool_args,
+    parse_gender,
+    parse_image_path,
+    reinput_request_message,
 )
 from agent.nodes import (
     act,
@@ -148,8 +148,8 @@ class ChatSession:
 
     def _initial_state(self, user_text: str) -> dict[str, Any]:
         updates: dict[str, Any] = {"messages": [HumanMessage(content=user_text)]}
-        parsed_image_path = _parse_image_path(user_text)
-        parsed_gender = _parse_gender(user_text)
+        parsed_image_path = parse_image_path(user_text)
+        parsed_gender = parse_gender(user_text)
         if parsed_image_path:
             updates["image_path"] = parsed_image_path
         if parsed_gender:
@@ -179,7 +179,7 @@ class ChatSession:
                     if isinstance(chunk, ToolMessage):
                         continue  # updates에서 한 블록으로 처리
                     node_name = (meta or {}).get("langgraph_node") if isinstance(meta, dict) else None
-                    text = _extract_text(getattr(chunk, "content", None))
+                    text = extract_text(getattr(chunk, "content", None))
                     if text:
                         if node_name == "final_report":
                             if not report_prefixed:
@@ -201,7 +201,7 @@ class ChatSession:
                                     if cid in sent_tool_calls:
                                         continue
                                     sent_tool_calls.add(cid)
-                                    args_str = _format_tool_args(call.get("args"))
+                                    args_str = format_tool_args(call.get("args"))
                                     yield f"\n\n🔧 [Act] {call.get('name')}({args_str})\n"
                                     thought_prefixed = False
                             elif isinstance(msg, ToolMessage):
@@ -209,15 +209,15 @@ class ChatSession:
                                 if key in sent_tool_msgs:
                                     continue
                                 sent_tool_msgs.add(key)
-                                content = _extract_text(msg.content)
+                                content = extract_text(msg.content)
                                 if content:
                                     yield f"\n📋 [Observe]\n{content}\n\n"
                                     thought_prefixed = False
         except UnicodeEncodeError:
-            yield _reinput_request_message()
+            yield reinput_request_message()
         except Exception as exc:  # noqa: BLE001
             if "surrogates not allowed" in str(exc):
-                yield _reinput_request_message()
+                yield reinput_request_message()
             else:
                 raise
 

@@ -8,8 +8,8 @@ from langchain_core.messages import AIMessage
 
 from agent.helpers import (
     DEFAULT_MAX_ITERATIONS,
-    _classify_intent,
-    _latest_human_message_text,
+    classify_intent,
+    latest_human_message_text,
 )
 from agent.state import BeautyAgentState
 
@@ -45,9 +45,9 @@ def route_from_start(state: BeautyAgentState) -> str:
       부족 시 insufficient_response로 분기.
     - 그 외에는 일반 ReAct 사이클(think) 시작.
     """
-    latest = _latest_human_message_text(state.get("messages") or [])
+    latest = latest_human_message_text(state.get("messages") or [])
 
-    if _classify_intent(latest) == "report":
+    if classify_intent(latest) == "report":
         has_diag = bool((state.get("skin_scores") or {}).get("raw_scores"))
         has_db = bool(state.get("db_recommendations"))
         has_pub = bool(state.get("pubmed_recommendations"))

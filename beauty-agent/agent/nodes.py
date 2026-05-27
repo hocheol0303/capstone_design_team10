@@ -11,11 +11,11 @@ from langgraph.prebuilt import ToolNode
 
 from agent.helpers import (
     DEFAULT_MAX_ITERATIONS,
-    _build_system_context,
-    _extract_state_context,
-    _extract_text,
-    _latest_human_message_text,
-    _load_llm,
+    build_system_context,
+    extract_state_context,
+    extract_text,
+    latest_human_message_text,
+    load_llm,
 )
 from agent.prompts import FINAL_REPORT_PROMPT
 from agent.state import BeautyAgentState
@@ -36,19 +36,19 @@ def think(state: BeautyAgentState) -> dict[str, Any]:
       - max_iterations:  미설정 시 기본값
       - image_path/gender: 사용자 입력에서 파싱한 컨텍스트
     """
-    context_updates = _extract_state_context(state)
+    context_updates = extract_state_context(state)
     merged_state = {**state, **context_updates}
 
     # "LLM아, 너가 사용할 수 있는 도구를 알려줄게. 그리고 그 도구들의 설명은 docstring으로 제공될거야(@tool 데코레이터 사용된 노드 한정)."
-    llm = _load_llm().bind_tools(
+    llm = load_llm().bind_tools(
         [skin_analyze_tool, recommend_treatment_db_tool, search_pubmed_tool]
     )
 
-    messages = [SystemMessage(content=_build_system_context(merged_state))]
+    messages = [SystemMessage(content=build_system_context(merged_state))]
     messages.extend(merged_state.get("messages") or [])
     response = llm.invoke(messages)
 
-    thought_text = _extract_text(getattr(response, "content", None))
+    thought_text = extract_text(getattr(response, "content", None))
     
     # act 노드(ToolNode)에서 state의 tool_calls를 보고 어떤 도구를 호출할지 결정함.
     # ToolNode가 state의 tool_calls 속성을 보고 도구 호출 여부와 호출할 도구를 결정함
@@ -64,7 +64,7 @@ def think(state: BeautyAgentState) -> dict[str, Any]:
         updates["actions"] = [dict(action_dict)]
 
     if not state.get("current_goal"):
-        goal = _latest_human_message_text(state.get("messages") or [])
+        goal = latest_human_message_text(state.get("messages") or [])
         if goal:
             updates["current_goal"] = goal[:200]
     if not state.get("max_iterations"):
@@ -85,7 +85,7 @@ def observe(state: BeautyAgentState) -> dict[str, Any]:
     collected: list[str] = []
     for msg in reversed(messages):
         if isinstance(msg, ToolMessage):
-            text = _extract_text(msg.content)
+            text = extract_text(msg.content)
             if text:
                 collected.append(text)
         elif isinstance(msg, AIMessage):
@@ -101,7 +101,7 @@ def finish(state: BeautyAgentState) -> dict[str, Any]:
     last_ai_text = ""
     for msg in reversed(state.get("messages") or []):
         if isinstance(msg, AIMessage):
-            last_ai_text = _extract_text(getattr(msg, "content", "")) or last_ai_text
+            last_ai_text = extract_text(getattr(msg, "content", "")) or last_ai_text
             if last_ai_text:
                 break
     return {
@@ -120,7 +120,7 @@ def final_report(state: BeautyAgentState) -> dict[str, Any]:
     skin_scores = state.get("skin_scores") or {}
     db_recs = state.get("db_recommendations") or []
     pubmed_recs = state.get("pubmed_recommendations") or []
-    history_text = _latest_human_message_text(state.get("messages") or [])
+    history_text = latest_human_message_text(state.get("messages") or [])
 
     parts: list[str] = ["다음 누적 자료를 바탕으로 환자용 최종 레포트를 작성하세요."]
     if skin_scores.get("raw_scores"):
@@ -154,7 +154,7 @@ def final_report(state: BeautyAgentState) -> dict[str, Any]:
     if history_text:
         parts.append(f"\n[사용자의 직전 요청]\n{history_text}")
 
-    llm = _load_llm()  # bind_tools 안 함 — 순수 텍스트
+    llm = load_llm()  # bind_tools 안 함 — 순수 텍스트
     response = llm.invoke([
         SystemMessage(content=FINAL_REPORT_PROMPT),
         HumanMessage(content="\n".join(parts)),
@@ -162,7 +162,7 @@ def final_report(state: BeautyAgentState) -> dict[str, Any]:
 
     return {
         "messages":     [response],
-        "final_answer": _extract_text(getattr(response, "content", "")),
+        "final_answer": extract_text(getattr(response, "content", "")),
         "is_complete":  True,
     }
 
@@ -192,5 +192,5 @@ def insufficient_response(state) -> dict:
         f"{progress_line}\n"
         "어떤 부분부터 진행하시겠어요? 사진을 업로드해 주시거나 진단부터 시작해도 됩니다."
     ))
-    text = _extract_text(msg.content)
+    text = extract_text(msg.content)
     return {"messages": [msg], "final_answer": text, "is_complete": True}

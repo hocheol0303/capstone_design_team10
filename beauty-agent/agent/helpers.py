@@ -19,11 +19,11 @@ from config import AI_MODEL
 DEFAULT_MAX_ITERATIONS = 6
 
 
-def _load_llm():
+def load_llm():
     return init_chat_model(model=AI_MODEL, temperature=0)
 
 
-def _latest_human_message_text(messages: list[BaseMessage]) -> str:
+def latest_human_message_text(messages: list[BaseMessage]) -> str:
     """가장 최근 HumanMessage의 텍스트. 없으면 빈 문자열."""
     for message in reversed(messages):
         if isinstance(message, HumanMessage):
@@ -31,7 +31,7 @@ def _latest_human_message_text(messages: list[BaseMessage]) -> str:
     return ""
 
 
-def _parse_image_path(text: str) -> str | None:
+def parse_image_path(text: str) -> str | None:
     patterns = [
         r"(?:image_path|path|경로)\s*[:=]\s*([^\s,]+)",
         r"(?:image|img)\s*[:=]\s*([^\s,]+)",
@@ -46,7 +46,7 @@ def _parse_image_path(text: str) -> str | None:
     return None
 
 
-def _parse_gender(text: str) -> str | None:
+def parse_gender(text: str) -> str | None:
     normalized = text.lower()
     if re.search(r"(?:\b여자\b|\bfemale\b|\bwoman\b)", normalized):
         return "female"
@@ -64,7 +64,7 @@ _INTENT_SYSTEM = (
 )
 
 
-def _classify_intent(user_text: str) -> str:
+def classify_intent(user_text: str) -> str:
     """LLM 기반 의도 분류. 'report' 또는 'general'.
 
     호출 실패 또는 입력이 비어 있으면 안전하게 'general' 반환.
@@ -72,18 +72,18 @@ def _classify_intent(user_text: str) -> str:
     if not user_text or not user_text.strip():
         return "general"
     try:
-        llm = _load_llm()
+        llm = load_llm()
         response = llm.invoke([
             SystemMessage(content=_INTENT_SYSTEM),
             HumanMessage(content=f"사용자 메시지: {user_text}\n분류:"),
         ])
-        label = _extract_text(getattr(response, "content", "")).strip().lower()
+        label = extract_text(getattr(response, "content", "")).strip().lower()
         return "report" if "report" in label else "general"
     except Exception:  # noqa: BLE001
         return "general"
 
 
-def _extract_text(content: Any) -> str:
+def extract_text(content: Any) -> str:
     if content is None:
         return ""
     if isinstance(content, str):
@@ -100,7 +100,7 @@ def _extract_text(content: Any) -> str:
     return str(content)
 
 
-def _build_system_context(state: BeautyAgentState) -> str:
+def build_system_context(state: BeautyAgentState) -> str:
     return (
         f"{SYSTEM_PROMPT}\n\n"
         "현재 state 요약:\n"
@@ -114,11 +114,11 @@ def _build_system_context(state: BeautyAgentState) -> str:
     )
 
 
-def _extract_state_context(state: BeautyAgentState) -> dict[str, str | None]:
+def extract_state_context(state: BeautyAgentState) -> dict[str, str | None]:
     """가장 최근 HumanMessage(text)에서 image_path/gender를 파싱해 state에 정착시킨다."""
-    text = _latest_human_message_text(state.get("messages") or [])
-    image_path = _parse_image_path(text)
-    gender = _parse_gender(text)
+    text = latest_human_message_text(state.get("messages") or [])
+    image_path = parse_image_path(text)
+    gender = parse_gender(text)
     updates: dict[str, str | None] = {}
     if image_path:
         updates["image_path"] = image_path
@@ -127,7 +127,7 @@ def _extract_state_context(state: BeautyAgentState) -> dict[str, str | None]:
     return updates
 
 
-def _format_tool_args(args: dict | None) -> str:
+def format_tool_args(args: dict | None) -> str:
     if not args:
         return ""
     pieces = []
@@ -139,5 +139,5 @@ def _format_tool_args(args: dict | None) -> str:
     return ", ".join(pieces)
 
 
-def _reinput_request_message() -> str:
+def reinput_request_message() -> str:
     return "입력에 처리할 수 없는 문자가 포함되어 있습니다. 다시 입력해 주세요."
