@@ -33,6 +33,7 @@ class BeautyAgentState(MessagesState):
 
     # ── 실행 컨텍스트 + 결과 ──────────────────────────────────
     current_goal: Annotated[str, "현재 달성하려는 목표"]
+    intent:       Annotated[str | None, "classify_intent_node가 결정한 의도 (report | general)"]
     final_answer: Annotated[str, "최종 답변"]
     is_complete:  Annotated[bool, "목표 달성 여부 (True면 finish로 분기)"]
 

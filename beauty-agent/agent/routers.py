@@ -6,11 +6,7 @@ from __future__ import annotations
 
 from langchain_core.messages import AIMessage
 
-from agent.helpers import (
-    DEFAULT_MAX_ITERATIONS,
-    classify_intent,
-    latest_human_message_text,
-)
+from agent.helpers import DEFAULT_MAX_ITERATIONS
 from agent.state import BeautyAgentState
 
 
@@ -38,20 +34,26 @@ def should_continue(state: BeautyAgentState) -> str:
     return "think"
 
 
-def route_from_start(state: BeautyAgentState) -> str:
-    """첫 진입 분기.
+def route_after_classify(state: BeautyAgentState) -> str:
+    """classify_intent_node 이후 1차 분기.
 
-    - 사용자 메시지가 '최종 레포트 요청'으로 분류되면 데이터 충분 시 compress(→final_report),
-      부족 시 insufficient_response로 분기.
-    - 그 외에는 일반 ReAct 사이클(think) 시작.
+    - intent == 'report' → data_gate (데이터 검증 단계로)
+    - 그 외 → think (일반 ReAct)
     """
-    latest = latest_human_message_text(state.get("messages") or [])
-
-    if classify_intent(latest) == "report":
-        has_diag = bool((state.get("skin_scores") or {}).get("raw_scores"))
-        has_db = bool(state.get("db_recommendations"))
-        has_pub = bool(state.get("pubmed_recommendations"))
-        if not has_diag or not (has_db or has_pub):
-            return "insufficient_response"
-        return "compress"
+    if state.get("intent") == "report":
+        return "data_gate"
     return "think"
+
+
+def route_after_data_gate(state: BeautyAgentState) -> str:
+    """data_gate 이후 2차 분기. report 의도가 확정된 상태에서 데이터 충분 여부 검증.
+
+    - 진단 + (시술 추천 or 논문 근거) → compress (→ final_report)
+    - 부족 → insufficient_response
+    """
+    has_diag = bool((state.get("skin_scores") or {}).get("raw_scores"))
+    has_db = bool(state.get("db_recommendations"))
+    has_pub = bool(state.get("pubmed_recommendations"))
+    if has_diag and (has_db or has_pub):
+        return "compress"
+    return "insufficient_response"

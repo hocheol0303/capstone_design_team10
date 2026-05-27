@@ -1,14 +1,15 @@
 """Beauty Agent — LangGraph StateGraph 빌더와 ChatSession wrapper.
 
-그래프 구조:
-    START → route_from_start
+그래프 구조 (2단계 계층 라우팅):
+    START → classify_intent
               ├─ think → conditional(act | finish)
               │   ↑                              │
               │   │ should_continue: think|finish│
               │  observe ← act ←─────────────────┘
               │
-              ├─ compress → final_report → END
-              └─ insufficient_response → END
+              └─ data_gate
+                    ├─ compress → final_report → END
+                    └─ insufficient_response → END
 
 노드 정의는 [nodes.py](nodes.py), 라우팅은 [routers.py](routers.py),
 헬퍼는 [helpers.py](helpers.py)에 분리되어 있다.
@@ -31,35 +32,50 @@ from agent.helpers import (
 )
 from agent.nodes import (
     act,
+    classify_intent_node,
     compress,
+    data_gate,
     final_report,
     finish,
     insufficient_response,
     observe,
     think,
 )
-from agent.routers import route_after_think, route_from_start, should_continue
+from agent.routers import (
+    route_after_classify,
+    route_after_data_gate,
+    route_after_think,
+    should_continue,
+)
 from agent.state import BeautyAgentState
 
 
 def build_graph(checkpointer: InMemorySaver | None = None):
-    """think → act → observe → conditional(think|finish) → END 사이클 + 레포트 우회 분기.
+    """2단계 계층 라우팅 + ReAct 사이클 + 레포트 작성 경로.
 
-    START에서 사용자 메시지가 '레포트' 트리거로 분류되면 think를 건너뛰고
-    데이터 충분 시 compress → final_report, 부족 시 insufficient_response로 분기한다.
+    1) classify_intent: 사용자 메시지의 의도(report | general)를 판정.
+    2) route_after_classify: report면 data_gate로, 아니면 think로.
+    3) data_gate(report 한정): 데이터 충분 시 compress→final_report, 부족 시 insufficient_response.
     """
     workflow = StateGraph(BeautyAgentState)
-    workflow.add_node("think",        think)
-    workflow.add_node("act",          act)
-    workflow.add_node("observe",      observe)
-    workflow.add_node("finish",       finish)
-    workflow.add_node("compress",     compress)
-    workflow.add_node("final_report", final_report)
+    workflow.add_node("classify_intent",       classify_intent_node)
+    workflow.add_node("data_gate",             data_gate)
+    workflow.add_node("think",                 think)
+    workflow.add_node("act",                   act)
+    workflow.add_node("observe",               observe)
+    workflow.add_node("finish",                finish)
+    workflow.add_node("compress",              compress)
+    workflow.add_node("final_report",          final_report)
     workflow.add_node("insufficient_response", insufficient_response)
 
-    workflow.add_conditional_edges(START, route_from_start, {
-        "think":                "think",
-        "compress":             "compress",
+    workflow.add_edge(START, "classify_intent")
+
+    workflow.add_conditional_edges("classify_intent", route_after_classify, {
+        "think":     "think",
+        "data_gate": "data_gate",
+    })
+    workflow.add_conditional_edges("data_gate", route_after_data_gate, {
+        "compress":              "compress",
         "insufficient_response": "insufficient_response",
     })
 

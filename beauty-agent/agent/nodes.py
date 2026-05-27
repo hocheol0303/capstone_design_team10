@@ -12,6 +12,7 @@ from langgraph.prebuilt import ToolNode
 from agent.helpers import (
     DEFAULT_MAX_ITERATIONS,
     build_system_context,
+    classify_intent,
     extract_state_context,
     extract_text,
     latest_human_message_text,
@@ -22,6 +23,24 @@ from agent.state import BeautyAgentState
 from tools.recommend_treatment_db import recommend_treatment_db as recommend_treatment_db_tool
 from tools.search_pubmed import search_pubmed as search_pubmed_tool
 from tools.skin_analyze import skin_analyze as skin_analyze_tool
+
+
+def classify_intent_node(state: BeautyAgentState) -> dict[str, Any]:
+    """가장 최근 user 메시지의 의도를 분류해 state.intent에 저장.
+
+    반환 값: 'report' | 'general'. 라우팅은 route_after_classify가 담당.
+    """
+    latest = latest_human_message_text(state.get("messages") or [])
+    return {"intent": classify_intent(latest)}
+
+
+def data_gate(state: BeautyAgentState) -> dict:
+    """라우팅 전용 더미 노드.
+
+    데이터 충분 여부는 route_after_data_gate가 체크해서
+    compress 또는 insufficient_response로 분기한다.
+    """
+    return {}
 
 
 def think(state: BeautyAgentState) -> dict[str, Any]:
