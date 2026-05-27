@@ -17,7 +17,7 @@ from agent.helpers import (
     latest_human_message_text,
     load_llm,
 )
-from agent.prompts import FINAL_REPORT_PROMPT
+from agent.prompts import COMPRESS_PROMPT, FINAL_REPORT_PROMPT
 from agent.state import BeautyAgentState
 from tools.recommend_treatment_db import recommend_treatment_db as recommend_treatment_db_tool
 from tools.search_pubmed import search_pubmed as search_pubmed_tool
@@ -110,8 +110,44 @@ def finish(state: BeautyAgentState) -> dict[str, Any]:
     }
 
 
+def compress(state: BeautyAgentState) -> dict[str, Any]:
+    """db/pubmed raw 결과를 LLM으로 사실 압축해 compressed_summary에 저장.
+
+    route_from_start가 데이터 충분(has_db or has_pub)을 보장한 뒤에만 진입.
+    """
+    db_recs = state.get("db_recommendations") or []
+    pubmed_recs = state.get("pubmed_recommendations") or []
+
+    parts: list[str] = []
+    if db_recs:
+        parts.append(
+            f"[DB 추천 시술 ({len(db_recs)}건)]\n" + "\n".join(
+                f"- {r.get('region_ko')} ({r.get('score')}점) → code {r.get('code')}: "
+                f"{r.get('treatment')}"
+                + (f"\n  안내: {(r.get('customer_desc') or '').strip()}" if r.get('customer_desc') else "")
+                for r in db_recs
+            )
+        )
+    if pubmed_recs:
+        parts.append(
+            f"[PubMed 논문 근거 ({len(pubmed_recs)}건)]\n" + "\n".join(
+                f"- {r.get('region_ko')} ({r.get('score')}점, {r.get('severity')}): "
+                f"{r.get('title')} — {r.get('authors')} {r.get('year')} (PMID {r.get('pmid')}) "
+                f"abstract: {r.get('abstract')}"
+                for r in pubmed_recs
+            )
+        )
+
+    llm = load_llm()
+    response = llm.invoke([
+        SystemMessage(content=COMPRESS_PROMPT),
+        HumanMessage(content="\n\n".join(parts)),
+    ])
+    return {"compressed_summary": extract_text(getattr(response, "content", ""))}
+
+
 def final_report(state: BeautyAgentState) -> dict[str, Any]:
-    """누적 state(skin_scores, db_recommendations, pubmed_recommendations)를 종합해
+    """누적 state(skin_scores + compressed_summary 또는 raw db/pubmed)를 종합해
     최종 환자용 레포트를 작성하고 대화를 종료한다.
 
     도구는 호출하지 않으며 LLM이 텍스트 답변만 생성한다. is_complete=True.
@@ -120,6 +156,7 @@ def final_report(state: BeautyAgentState) -> dict[str, Any]:
     skin_scores = state.get("skin_scores") or {}
     db_recs = state.get("db_recommendations") or []
     pubmed_recs = state.get("pubmed_recommendations") or []
+    summary = state.get("compressed_summary")
     history_text = latest_human_message_text(state.get("messages") or [])
 
     parts: list[str] = ["다음 누적 자료를 바탕으로 환자용 최종 레포트를 작성하세요."]
@@ -130,22 +167,26 @@ def final_report(state: BeautyAgentState) -> dict[str, Any]:
             f"- 성별: {skin_scores.get('gender_input') or state.get('gender')}\n"
             f"- 부위별 raw 점수(0~100, 낮을수록 심각): {skin_scores['raw_scores']}"
         )
-    if db_recs:
-        parts.append(
-            f"\n[DB 추천 시술 ({len(db_recs)}건)]\n" + "\n".join(
-                f"- {r.get('region_ko')} ({r.get('score')}점) → code {r.get('code')}: {r.get('treatment')}"
-                + (f"\n  안내: {(r.get('customer_desc') or '').strip()}" if r.get('customer_desc') else "")
-                for r in db_recs
+    if summary:
+        parts.append(f"\n[추천·근거 요약]\n{summary}")
+    else:
+        # compress 노드를 거치지 않은 경우의 fallback (raw 직접 포매팅)
+        if db_recs:
+            parts.append(
+                f"\n[DB 추천 시술 ({len(db_recs)}건)]\n" + "\n".join(
+                    f"- {r.get('region_ko')} ({r.get('score')}점) → code {r.get('code')}: {r.get('treatment')}"
+                    + (f"\n  안내: {(r.get('customer_desc') or '').strip()}" if r.get('customer_desc') else "")
+                    for r in db_recs
+                )
             )
-        )
-    if pubmed_recs:
-        parts.append(
-            f"\n[PubMed 논문 근거 ({len(pubmed_recs)}건)]\n" + "\n".join(
-                f"- {r.get('region_ko')} ({r.get('score')}점, {r.get('severity')}): "
-                f"{r.get('title')} — {r.get('authors')} {r.get('year')} (PMID {r.get('pmid')})"
-                for r in pubmed_recs
+        if pubmed_recs:
+            parts.append(
+                f"\n[PubMed 논문 근거 ({len(pubmed_recs)}건)]\n" + "\n".join(
+                    f"- {r.get('region_ko')} ({r.get('score')}점, {r.get('severity')}): "
+                    f"{r.get('title')} — {r.get('authors')} {r.get('year')} (PMID {r.get('pmid')})"
+                    for r in pubmed_recs
+                )
             )
-        )
     if len(parts) == 1:
         parts.append(
             "\n현재 누적된 진단/추천/근거 자료가 없습니다. "

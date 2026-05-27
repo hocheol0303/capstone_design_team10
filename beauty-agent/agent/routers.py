@@ -41,7 +41,7 @@ def should_continue(state: BeautyAgentState) -> str:
 def route_from_start(state: BeautyAgentState) -> str:
     """첫 진입 분기.
 
-    - 사용자 메시지가 '최종 레포트 요청'으로 분류되면 데이터 충분 시 final_report,
+    - 사용자 메시지가 '최종 레포트 요청'으로 분류되면 데이터 충분 시 compress(→final_report),
       부족 시 insufficient_response로 분기.
     - 그 외에는 일반 ReAct 사이클(think) 시작.
     """
@@ -53,5 +53,5 @@ def route_from_start(state: BeautyAgentState) -> str:
         has_pub = bool(state.get("pubmed_recommendations"))
         if not has_diag or not (has_db or has_pub):
             return "insufficient_response"
-        return "final_report"
+        return "compress"
     return "think"

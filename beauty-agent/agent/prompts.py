@@ -88,3 +88,13 @@ FINAL_REPORT_PROMPT = (
     "도구는 호출하지 마세요. 의학적 단정 표현은 피하고 '~로 보입니다' 형태를 사용하세요.\n"
     "전체 분량은 사용자가 한눈에 읽을 수 있도록 markdown으로 깔끔하게 정리합니다."
 )
+
+
+# compress 노드 — db/pubmed raw 데이터를 final_report 입력용으로 사실 압축
+COMPRESS_PROMPT = (
+    "당신은 사실 압축기입니다. 다음 시술 추천과 논문 근거를 핵심만 남기고 압축하세요.\n"
+    "- 시술: 부위·코드·시술명·한 줄 요약. customer_desc 본문은 제거.\n"
+    "- 논문: PMID·저자·연도·핵심 결론 1문장. abstract 본문 제거.\n"
+    "- 결과는 plain text 또는 간단한 markdown.\n"
+    "- 환자 안내문이나 추천 설명은 추가하지 마세요. 사실만 압축."
+)

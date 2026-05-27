@@ -7,7 +7,7 @@
               │   │ should_continue: think|finish│
               │  observe ← act ←─────────────────┘
               │
-              ├─ final_report → END
+              ├─ compress → final_report → END
               └─ insufficient_response → END
 
 노드 정의는 [nodes.py](nodes.py), 라우팅은 [routers.py](routers.py),
@@ -31,6 +31,7 @@ from agent.helpers import (
 )
 from agent.nodes import (
     act,
+    compress,
     final_report,
     finish,
     insufficient_response,
@@ -45,17 +46,22 @@ def build_graph(checkpointer: InMemorySaver | None = None):
     """think → act → observe → conditional(think|finish) → END 사이클 + 레포트 우회 분기.
 
     START에서 사용자 메시지가 '레포트' 트리거로 분류되면 think를 건너뛰고
-    데이터 충분 시 final_report, 부족 시 insufficient_response로 분기한다.
+    데이터 충분 시 compress → final_report, 부족 시 insufficient_response로 분기한다.
     """
     workflow = StateGraph(BeautyAgentState)
     workflow.add_node("think",        think)
     workflow.add_node("act",          act)
     workflow.add_node("observe",      observe)
     workflow.add_node("finish",       finish)
+    workflow.add_node("compress",     compress)
     workflow.add_node("final_report", final_report)
     workflow.add_node("insufficient_response", insufficient_response)
 
-    workflow.add_conditional_edges(START, route_from_start)
+    workflow.add_conditional_edges(START, route_from_start, {
+        "think":                "think",
+        "compress":             "compress",
+        "insufficient_response": "insufficient_response",
+    })
 
     workflow.add_conditional_edges("think", route_after_think, {
         "act":    "act",
@@ -67,6 +73,7 @@ def build_graph(checkpointer: InMemorySaver | None = None):
         "finish": "finish",
     })
 
+    workflow.add_edge("compress", "final_report")
     workflow.add_edge("insufficient_response", END)
     workflow.add_edge("finish",       END)
     workflow.add_edge("final_report", END)
