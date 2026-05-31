@@ -1,0 +1,29 @@
+# 원클릭 실행용 Compose 정의.
+#
+#   1) cp .env.example .env   (그리고 키 채우기)
+#   2) docker compose run --rm beauty-agent          # 채팅 실행 (python main.py)
+#
+# 그 외:
+#   docker compose build                              # 이미지 빌드만
+#   docker compose run --rm beauty-agent bash         # 컨테이너 셸 진입
+#   docker compose run --rm beauty-agent python auradb/aura_upload_beauty_rules.py   # DB 규칙 적재(최초 1회)
+#
+# 코드는 호스트와 bind-mount(.:/workspace) 되어 수정이 즉시 반영됩니다.
+
+services:
+  beauty-agent:
+    build:
+      context: ./docker
+    image: skin_inference:latest
+    container_name: skin_inference
+    env_file:
+      - .env
+    working_dir: /workspace
+    volumes:
+      - .:/workspace
+    environment:
+      TZ: Asia/Seoul
+      PYTHONUNBUFFERED: "1"
+    stdin_open: true   # -i
+    tty: true          # -t
+    command: ["python", "main.py"]

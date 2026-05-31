@@ -15,12 +15,28 @@ from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from agent.prompts import SYSTEM_PROMPT
 from agent.state import BeautyAgentState
 from config import AI_MODEL
+from tools.skin_analyze import aggregate_regions
 
 DEFAULT_MAX_ITERATIONS = 6
 
 
-def load_llm():
-    return init_chat_model(model=AI_MODEL, temperature=0)
+def load_llm(
+    temperature: float = 0.0,
+    frequency_penalty: float = 0.0,
+    max_tokens: int | None = None,
+):
+    """LLM 로더. 기본은 결정적(temperature=0).
+
+    대화형 노드(think/final_report)는 친근한 말투를 위해 약간 높은 온도를 넘기고,
+    긴 리포트 생성 시 반복 루프를 막기 위해 frequency_penalty/max_tokens를 함께 준다.
+    JSON을 뱉는 내부 단계(분류/검색어/리랭킹)는 기본값을 그대로 쓴다.
+    """
+    kwargs: dict = {"model": AI_MODEL, "temperature": temperature}
+    if frequency_penalty:
+        kwargs["frequency_penalty"] = frequency_penalty
+    if max_tokens:
+        kwargs["max_tokens"] = max_tokens
+    return init_chat_model(**kwargs)
 
 
 def latest_human_message_text(messages: list[BaseMessage]) -> str:
@@ -100,17 +116,90 @@ def extract_text(content: Any) -> str:
     return str(content)
 
 
+def format_current_scores(state: BeautyAgentState) -> str:
+    """state에 저장된 raw_scores를 부위별 집계 점수로 정리해 system context에 노출.
+
+    후속 질문(예: '색소는 어때?')에서 LLM이 기억 대신 실제 값을 근거로
+    '낮을수록 심각' 규칙에 맞게 답하도록 사실을 명시적으로 제공한다.
+    """
+    skin_scores = state.get("skin_scores") or {}
+    raw_scores = skin_scores.get("raw_scores")
+    if not raw_scores:
+        return "없음"
+
+    aggregated = aggregate_regions(raw_scores)
+    if not aggregated:
+        return "존재(점수 파싱 불가)"
+
+    score_lines = ", ".join(f"{r['region_ko']} {r['score']:.1f}점" for r in aggregated)
+    worst = ", ".join(f"{r['region_ko']} {r['score']:.1f}점" for r in aggregated[:3])
+    age = skin_scores.get("age")
+    age_part = f" / 추정 연령 {age:.0f}세" if isinstance(age, (int, float)) else ""
+    return (
+        f"존재{age_part}\n"
+        f"    · 부위별 점수(낮을수록 심각, 높을수록 양호): {score_lines}\n"
+        f"    · 가장 심각한(점수 낮은) 부위 top3: {worst}"
+    )
+
+
+def severe_untreated_directive(state: BeautyAgentState) -> str:
+    """추천에서 빠진 '최악 부위' 브리지 문장을 결정적으로 계산해 반환.
+
+    db_recommendations 중 코드가 _0(시술 불필요)인데, 정작 점수가 '추천된 부위
+    중 가장 낮은 점수'보다도 더 낮은(=더 심각한) 부위를 찾는다. 이런 부위는
+    Step 1에서 최악으로 강조됐다가 Step 2에서 소리 없이 사라져 사용자를 혼란스럽게
+    하므로, 모델이 거의 그대로 베껴 쓸 완성된 한 줄을 미리 만들어 준다.
+
+    조건에 해당하는 부위가 없으면 빈 문자열을 반환한다.
+    """
+    db_recs = state.get("db_recommendations") or []
+    if not db_recs:
+        return ""
+
+    def _is_untreated(rec: dict) -> bool:
+        return (rec.get("code") or "").endswith("_0")
+
+    needs = [r for r in db_recs if not _is_untreated(r) and r.get("score") is not None]
+    untreated = [r for r in db_recs if _is_untreated(r) and r.get("score") is not None]
+    if not needs or not untreated:
+        return ""
+
+    worst_needed_score = min(r["score"] for r in needs)
+    flagged = sorted(
+        (r for r in untreated if r["score"] < worst_needed_score),
+        key=lambda r: r["score"],
+    )[:3]
+    if not flagged:
+        return ""
+
+    listed = ", ".join(f"{r['region_ko']} {r['score']:.1f}점" for r in flagged)
+    names = "·".join(r["region_ko"] for r in flagged)
+    sentence = (
+        f"가장 점수가 낮은 {names}는 현재 DB상 바로 권장되는 시술은 없으나, "
+        "보습·자외선 차단 등 생활관리와 함께 대면 상담에서 별도로 살펴보시길 권합니다."
+    )
+    return (
+        f"[필수 포함 — 최악 부위 브리지] 점수가 가장 낮은 {listed}이(가) DB상 '시술 불필요(_0)'로 "
+        "분류되어 Step 2 추천 카드에서 빠집니다. 사용자가 자신의 최악 부위가 이유 없이 사라졌다고 "
+        "느끼지 않도록, Step 2 마지막에 아래 문장을 거의 그대로 한 줄 넣으세요(생략 금지):\n"
+        f"      \"{sentence}\""
+    )
+
+
 def build_system_context(state: BeautyAgentState) -> str:
+    directive = severe_untreated_directive(state)
+    directive_block = f"\n{directive}\n" if directive else ""
     return (
         f"{SYSTEM_PROMPT}\n\n"
         "현재 state 요약:\n"
         f"- current_goal: {state.get('current_goal') or '(아직 설정되지 않음)'}\n"
         f"- image_path: {state.get('image_path') or 'None'}\n"
         f"- gender: {state.get('gender') or 'None'}\n"
-        f"- skin_scores: {'존재' if state.get('skin_scores') else '없음'}\n"
+        f"- skin_scores: {format_current_scores(state)}\n"
         f"- db_recommendations: {'존재' if state.get('db_recommendations') else '없음'}\n"
         f"- pubmed_recommendations: {'존재' if state.get('pubmed_recommendations') else '없음'}\n"
         f"- iteration: {state.get('iteration_count', 0)}/{state.get('max_iterations', DEFAULT_MAX_ITERATIONS)}\n"
+        f"{directive_block}"
     )
 
 
