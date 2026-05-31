@@ -44,6 +44,4 @@ class BeautyAgentState(MessagesState):
     top_concerns:           Annotated[list | None, "주요 관심사"]
     db_recommendations:     Annotated[list | None, "데이터베이스 추천"]
     pubmed_recommendations: Annotated[list | None, "PubMed 추천"]
-    db_forced:              Annotated[bool, "진단 직후 시술 추천(DB) 조회를 1회 강제했는지"]
-    pubmed_forced:          Annotated[bool, "추천 직후 PubMed 근거 검색을 1회 강제했는지"]
     compressed_summary:     Annotated[str | None, "compress 노드가 만든 추천/근거 압축 텍스트"]

@@ -187,8 +187,11 @@ def severe_untreated_directive(state: BeautyAgentState) -> str:
 
 
 def build_system_context(state: BeautyAgentState) -> str:
-    directive = severe_untreated_directive(state)
-    directive_block = f"\n{directive}\n" if directive else ""
+    """think 노드용 system context.
+
+    severe_untreated_directive는 풀 리포트 전용이므로 여기서는 주입하지 않는다
+    (final_report 노드가 직접 가져다 쓴다).
+    """
     return (
         f"{SYSTEM_PROMPT}\n\n"
         "현재 state 요약:\n"
@@ -199,7 +202,6 @@ def build_system_context(state: BeautyAgentState) -> str:
         f"- db_recommendations: {'존재' if state.get('db_recommendations') else '없음'}\n"
         f"- pubmed_recommendations: {'존재' if state.get('pubmed_recommendations') else '없음'}\n"
         f"- iteration: {state.get('iteration_count', 0)}/{state.get('max_iterations', DEFAULT_MAX_ITERATIONS)}\n"
-        f"{directive_block}"
     )
 
 

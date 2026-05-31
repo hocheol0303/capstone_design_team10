@@ -3,19 +3,13 @@
 그래프 구조 (2단계 계층 라우팅):
     START → classify_intent
               ├─ think → conditional(act | finish)
-              │   ↑                                          │
-              │   │ should_continue: think|inject_pubmed|fin │
-              │  observe ← act ← inject_pubmed ◄─────────────┘
-              │           ▲___________│ (추천 직후 근거 검색 1회 강제)
+              │   ↑                              │
+              │   │ should_continue: think|finish│
+              │  observe ← act ←─────────────────┘
               │
               └─ data_gate
                     ├─ compress → final_report → END
                     └─ insufficient_response → END
-
-inject_recommend: 진단(skin_scores) 후 추천 의도인데 db_recommendations가 없으면
-LLM 판단과 무관하게 recommend_treatment_db를 1회 강제(db_forced 가드). 시술명 환각 방지.
-inject_pubmed: 시술 추천(db_recommendations)이 나왔는데 PubMed 근거가 없으면
-LLM 판단과 무관하게 search_pubmed를 1회 강제 호출(pubmed_forced 가드로 1회만).
 
 노드 정의는 [nodes.py](nodes.py), 라우팅은 [routers.py](routers.py),
 헬퍼는 [helpers.py](helpers.py)에 분리되어 있다.
@@ -43,8 +37,6 @@ from agent.nodes import (
     data_gate,
     final_report,
     finish,
-    inject_pubmed_call,
-    inject_recommend_call,
     insufficient_response,
     observe,
     think,
@@ -71,8 +63,6 @@ def build_graph(checkpointer: InMemorySaver | None = None):
     workflow.add_node("think",                 think)
     workflow.add_node("act",                   act)
     workflow.add_node("observe",               observe)
-    workflow.add_node("inject_recommend",      inject_recommend_call)
-    workflow.add_node("inject_pubmed",         inject_pubmed_call)
     workflow.add_node("finish",                finish)
     workflow.add_node("compress",              compress)
     workflow.add_node("final_report",          final_report)
@@ -95,13 +85,9 @@ def build_graph(checkpointer: InMemorySaver | None = None):
     })
     workflow.add_edge("act", "observe")
     workflow.add_conditional_edges("observe", should_continue, {
-        "think":            "think",
-        "finish":           "finish",
-        "inject_recommend": "inject_recommend",
-        "inject_pubmed":    "inject_pubmed",
+        "think":  "think",
+        "finish": "finish",
     })
-    workflow.add_edge("inject_recommend", "act")
-    workflow.add_edge("inject_pubmed", "act")
 
     workflow.add_edge("compress", "final_report")
     workflow.add_edge("insufficient_response", END)
@@ -184,14 +170,11 @@ class ChatSession:
     # ── 입력/스트림 ──
 
     def _initial_state(self, user_text: str) -> dict[str, Any]:
-        # ReAct 루프 가드는 "한 사용자 턴" 단위여야 한다. iteration_count/pubmed_forced를
-        # 매 입력마다 리셋하지 않으면 세션이 길어질수록 max_iterations에 조기 도달해
-        # (강제 search_pubmed 직후의) 최종 종합 답변이 잘려나간다.
+        # ReAct 루프 가드는 "한 사용자 턴" 단위. iteration_count를 매 입력마다 리셋해서
+        # 세션이 길어져도 max_iterations에 조기 도달하지 않게 한다.
         updates: dict[str, Any] = {
             "messages": [HumanMessage(content=user_text)],
             "iteration_count": 0,
-            "db_forced": False,
-            "pubmed_forced": False,
         }
         parsed_image_path = parse_image_path(user_text)
         parsed_gender = parse_gender(user_text)
