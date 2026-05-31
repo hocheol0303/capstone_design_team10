@@ -258,13 +258,24 @@ docker exec -w /workspace skin_inference python auradb/aura_upload_beauty_rules.
 
 [docker/Dockerfile](docker/Dockerfile): `python:3.11-slim` 기반. tensorflow-cpu + mediapipe + langchain/langgraph/neo4j/openpyxl 설치. user1(UID 1000)으로 실행, `/workspace` 마운트.
 
+**권장: Docker Compose ([docker-compose.yml](docker-compose.yml))**
+
+```bash
+docker compose build                              # 이미지 빌드 (skin_inference:latest)
+docker compose run --rm beauty-agent              # 채팅 실행 (python main.py)
+docker compose run --rm beauty-agent bash         # 셸 진입
+```
+
+**기존 스크립트 (동일 동작)**
+
 ```bash
 bash docker_build.sh    # 이미지 빌드 (skin_inference:latest)
 bash docker_run.sh      # 컨테이너 기동 (-v .:/workspace, name=skin_inference)
 bash docker_attach.sh   # 셸 진입
 ```
 
-`docker_run.sh`는 호스트 CWD를 `/workspace`에 바인드 마운트하므로 코드 수정이 컨테이너에 즉시 반영된다.
+둘 다 호스트 CWD를 `/workspace`에 바인드 마운트하므로 코드 수정이 컨테이너에 즉시 반영된다.
+Compose는 `.env`를 자동으로 주입(`env_file`)하므로 별도 `-e` 옵션이 필요 없다.
 
 ---
 
@@ -298,23 +309,48 @@ EXCEL_PATH=auradb/data/mapping_table_tmp.xlsx
 
 ## 빠른 시작
 
-기준 실행 위치: 프로젝트 루트.
+기준 실행 위치: 프로젝트 루트. **Docker + Docker Compose만 있으면 됩니다.**
 
 ```bash
-# 1) 도커 이미지 빌드 + 컨테이너 기동
-bash docker_build.sh
-bash docker_run.sh
+# 1) 저장소 클론
+git clone <repo-url>
+cd capstone_design_team10
 
-# 2) .env 작성 (루트)
+# 2) .env 작성 (루트) — 실제 키 채우기
 cp .env.example .env
-$EDITOR .env  # OPENAI_API_KEY, NEO4J_* 채우기
+$EDITOR .env  # OPENAI_API_KEY, NEO4J_* 등
 
-# 3) AuraDB에 시술 규칙 적재 (최초 1회 / 데이터 변경 시)
-docker exec -w /workspace skin_inference python auradb/aura_upload_beauty_rules.py
+# 3) 모델 가중치 배치 (최초 1회) — 아래 '모델 파일' 섹션 참고
+#    pipeline/inference_models/ 아래에 .tflite / .task 파일이 있어야 합니다.
 
-# 4) 채팅 실행
-docker exec -w /workspace -it skin_inference python main.py
+# 4) 이미지 빌드 (최초 1회)
+docker compose build
+
+# 5) AuraDB에 시술 규칙 적재 (최초 1회 / 데이터 변경 시)
+docker compose run --rm beauty-agent python auradb/aura_upload_beauty_rules.py
+
+# 6) 채팅 실행
+docker compose run --rm beauty-agent
 ```
+
+> 기존 `docker_build.sh` / `docker_run.sh` / `docker_attach.sh` 스크립트도 그대로 동작하지만,
+> 신규 사용자는 위 `docker compose` 흐름을 권장합니다.
+
+### 모델 파일 (필수)
+
+`pipeline/config.yaml`이 참조하는 추론 모델은 용량이 커서 Git에 포함되지 않을 수 있습니다.
+clone 직후 아래 파일들이 `pipeline/inference_models/` 아래 있는지 확인하세요(없으면 진단이 실패합니다):
+
+```
+pipeline/inference_models/face_landmarker.task
+pipeline/inference_models/age_reg/*.tflite
+pipeline/inference_models/pigment_reg/*.tflite
+pipeline/inference_models/wrinkle_reg/*.tflite
+pipeline/inference_models/homogenity_reg/*.tflite
+pipeline/inference_models/{cheek,chin}-{male,female}_params.json   # (Git에 포함)
+```
+
+없으면 모델 제공자에게 별도 전달받아 위 경로에 두세요(또는 Git LFS / 릴리스 첨부로 배포).
 
 채팅 예:
 ```

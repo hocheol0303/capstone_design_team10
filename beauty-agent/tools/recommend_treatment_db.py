@@ -116,7 +116,10 @@ def _format_group_block(group: dict, include_rank: bool = False, rank: int | Non
     feature_name = group["feature_name"]
     regions_text = _format_region_list(group["regions"])
     code = best.get("code", "") or ""
-    treatment = (best.get("treatment") or "").strip()
+    # treatment 안의 줄바꿈은 한 시술명이 두 줄로 쪼개져 보이는 원인이므로 ", "로 합친다.
+    treatment = ", ".join(
+        seg.strip() for seg in (best.get("treatment") or "").splitlines() if seg.strip()
+    )
     desc = (best.get("customer_desc") or "").replace("\n", " ").strip()
 
     header = f"- {feature_name} [{regions_text}]"
@@ -133,23 +136,41 @@ def _format_group_block(group: dict, include_rank: bool = False, rank: int | Non
     return lines
 
 
+def _needs_treatment(group: dict) -> bool:
+    """대표 코드가 _0(시술 불필요)으로 끝나지 않으면 관리가 필요한 부위."""
+    code = (group["best"].get("code") or "")
+    return not code.endswith("_0")
+
+
 def _format_recommendations(recs: list[dict], errors: list[dict]) -> str:
-    """LLM에 노출할 자연어 요약. similarity/query_used/clinician_desc/matched_age_group 등 내부 값은 제외한다."""
+    """LLM에 노출할 자연어 요약. similarity/query_used/clinician_desc/matched_age_group 등 내부 값은 제외한다.
+
+    하드코딩된 '하위 3개' 추천을 제거한다. 실제로 시술이 필요한(코드가 _0이 아닌) 부위만,
+    점수가 낮은(심각한) 순서로 추천한다. _0 매칭 부위는 'DB상 시술 불필요'로만 간단히 알린다.
+    """
     if not recs:
         body = "조회된 추천 결과가 없습니다."
     else:
-        grouped = _group_recommendations(recs)
-        top3 = grouped[:3]
+        grouped = _group_recommendations(recs)  # 점수가 낮은(심각한) 순으로 정렬되어 있음
+        needs = [g for g in grouped if _needs_treatment(g)]
+        fine = [g for g in grouped if not _needs_treatment(g)]
 
         lines = ["AuraDB FeatureRule 조회 결과"]
-        lines.append("\n[부위/카테고리별 권장 시술]")
-        for group in grouped:
-            lines.extend(_format_group_block(group))
 
-        if top3:
-            lines.append("\n[추천 시술 - 심각도가 높은 카테고리 3개]")
-            for idx, group in enumerate(top3, start=1):
+        if needs:
+            lines.append("\n[관리가 필요한 부위 — 점수가 낮은(심각한) 순]")
+            for idx, group in enumerate(needs, start=1):
                 lines.extend(_format_group_block(group, include_rank=True, rank=idx))
+        else:
+            lines.append("\n[관리가 필요한 부위] 없음 — 현재 시술이 필요한 부위는 보이지 않습니다.")
+
+        if fine:
+            fine_summary = "; ".join(
+                f"{g['feature_name']} [{_format_region_list(g['regions'])}]"
+                for g in fine
+            )
+            lines.append("\n[DB상 시술 불필요]")
+            lines.append(f"  {fine_summary}")
 
         body = "\n".join(lines)
 

@@ -4,6 +4,7 @@ think → act → observe → finish / final_report / insufficient_response.
 """
 from __future__ import annotations
 
+import uuid
 from typing import Any
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
@@ -17,11 +18,14 @@ from agent.helpers import (
     extract_text,
     latest_human_message_text,
     load_llm,
+    severe_untreated_directive,
 )
 from agent.prompts import COMPRESS_PROMPT, FINAL_REPORT_PROMPT
 from agent.state import BeautyAgentState
+from config import AI_TEMPERATURE_CHAT
 from tools.recommend_treatment_db import recommend_treatment_db as recommend_treatment_db_tool
 from tools.search_pubmed import search_pubmed as search_pubmed_tool
+from tools.skin_analyze import aggregate_regions
 from tools.skin_analyze import skin_analyze as skin_analyze_tool
 
 
@@ -59,7 +63,11 @@ def think(state: BeautyAgentState) -> dict[str, Any]:
     merged_state = {**state, **context_updates}
 
     # "LLM아, 너가 사용할 수 있는 도구를 알려줄게. 그리고 그 도구들의 설명은 docstring으로 제공될거야(@tool 데코레이터 사용된 노드 한정)."
-    llm = load_llm().bind_tools(
+    llm = load_llm(
+        temperature=AI_TEMPERATURE_CHAT,
+        frequency_penalty=0.3,
+        max_tokens=2000,
+    ).bind_tools(
         [skin_analyze_tool, recommend_treatment_db_tool, search_pubmed_tool]
     )
 
@@ -96,6 +104,48 @@ def think(state: BeautyAgentState) -> dict[str, Any]:
 # act = 책 표준 ToolNode.
 # 도구별 가드(image_path 필수, skin_scores 필수 등)는 각 도구 함수 본문에서 직접 수행.
 act = ToolNode([skin_analyze_tool, recommend_treatment_db_tool, search_pubmed_tool])
+
+
+def inject_recommend_call(state: BeautyAgentState) -> dict[str, Any]:
+    """진단(skin_scores) 후 추천 의도일 때, LLM 판단과 무관하게 recommend_treatment_db를 1회 강제.
+
+    gpt-4o-mini가 진단 다음에 도구를 건너뛰고 시술명을 임의로 지어내는(환각) 일을 막는다.
+    이 강제 호출로 실제 DB 추천이 히스토리에 들어와야 think가 사실 기반으로 리포트를 쓴다.
+    db_forced 플래그로 1회만 실행돼 무한 루프를 방지한다.
+    """
+    call_id = f"forced_recommend_{uuid.uuid4().hex[:8]}"
+    tool_call = {"name": "recommend_treatment_db", "args": {}, "id": call_id}
+    msg = AIMessage(
+        content="진단 결과를 바탕으로 매칭되는 시술을 조회하겠습니다.",
+        tool_calls=[tool_call],
+    )
+    return {
+        "messages": [msg],
+        "actions": [dict(tool_call)],
+        "iteration_count": state.get("iteration_count", 0) + 1,
+        "db_forced": True,
+    }
+
+
+def inject_pubmed_call(state: BeautyAgentState) -> dict[str, Any]:
+    """시술 추천(db_recommendations) 직후, LLM 판단과 무관하게 search_pubmed를 1회 강제.
+
+    gpt-4o-mini가 추천 다음 단계로 근거 검색을 안정적으로 이어가지 못하므로,
+    추천에 학술 근거를 항상 덧붙이도록 그래프 차원에서 결정적으로 tool_call을 발행한다.
+    pubmed_forced 플래그로 1회만 실행돼 무한 루프를 방지한다.
+    """
+    call_id = f"forced_pubmed_{uuid.uuid4().hex[:8]}"
+    tool_call = {"name": "search_pubmed", "args": {}, "id": call_id}
+    msg = AIMessage(
+        content="추천 시술의 학술적 근거를 확인하기 위해 PubMed 논문을 검색하겠습니다.",
+        tool_calls=[tool_call],
+    )
+    return {
+        "messages": [msg],
+        "actions": [dict(tool_call)],
+        "iteration_count": state.get("iteration_count", 0) + 1,
+        "pubmed_forced": True,
+    }
 
 
 def observe(state: BeautyAgentState) -> dict[str, Any]:
@@ -180,11 +230,19 @@ def final_report(state: BeautyAgentState) -> dict[str, Any]:
 
     parts: list[str] = ["다음 누적 자료를 바탕으로 환자용 최종 레포트를 작성하세요."]
     if skin_scores.get("raw_scores"):
+        aggregated = aggregate_regions(skin_scores["raw_scores"])
+        score_text = ", ".join(
+            f"{r['region_ko']} {r['score']:.1f}점" for r in aggregated
+        ) or "(점수 없음)"
+        worst = ", ".join(
+            f"{r['region_ko']} {r['score']:.1f}점" for r in aggregated[:3]
+        )
         parts.append(
-            "\n[피부 진단 결과]\n"
+            "\n[피부 진단 결과] (점수 0~100, 낮을수록 심각 / 아래 값을 그대로 사용하고 새 숫자를 만들지 마세요)\n"
             f"- 추정 연령: {skin_scores.get('age')}\n"
             f"- 성별: {skin_scores.get('gender_input') or state.get('gender')}\n"
-            f"- 부위별 raw 점수(0~100, 낮을수록 심각): {skin_scores['raw_scores']}"
+            f"- 부위별 점수: {score_text}\n"
+            f"- 가장 심각한(점수 낮은) 부위 top3: {worst}"
         )
     if summary:
         parts.append(f"\n[추천·근거 요약]\n{summary}")
@@ -211,10 +269,17 @@ def final_report(state: BeautyAgentState) -> dict[str, Any]:
             "\n현재 누적된 진단/추천/근거 자료가 없습니다. "
             "사용자에게 자료 없음을 솔직히 안내하고, 진단(skin_analyze)부터 진행할 것을 권하세요."
         )
+    directive = severe_untreated_directive(state)
+    if directive:
+        parts.append(f"\n{directive}")
     if history_text:
         parts.append(f"\n[사용자의 직전 요청]\n{history_text}")
 
-    llm = load_llm()  # bind_tools 안 함 — 순수 텍스트
+    llm = load_llm(  # bind_tools 안 함 — 순수 텍스트
+        temperature=AI_TEMPERATURE_CHAT,
+        frequency_penalty=0.3,
+        max_tokens=2500,
+    )
     response = llm.invoke([
         SystemMessage(content=FINAL_REPORT_PROMPT),
         HumanMessage(content="\n".join(parts)),
