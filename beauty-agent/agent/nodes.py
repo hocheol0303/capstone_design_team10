@@ -55,6 +55,7 @@ def think(state: BeautyAgentState) -> dict[str, Any]:
       - max_iterations:  미설정 시 기본값
       - image_path/gender: 사용자 입력에서 파싱한 컨텍스트
     """
+    # 사용자의 가장 최근 입력에서 image_path, gender 추출
     context_updates = extract_state_context(state)
     merged_state = {**state, **context_updates}
 
@@ -63,26 +64,33 @@ def think(state: BeautyAgentState) -> dict[str, Any]:
         [skin_analyze_tool, recommend_treatment_db_tool, search_pubmed_tool]
     )
 
+    # 에이전트에게 현재 state 요약, 시스템 프롬프트를 주입
     messages = [SystemMessage(content=build_system_context(merged_state))]
+    # 지금까지의 대화 내역 + 사용자의 입력(messages state에 포함됨) 주입
     messages.extend(merged_state.get("messages") or [])
     response = llm.invoke(messages)
 
+    # LLM의 결과 text를 추출
     thought_text = extract_text(getattr(response, "content", None))
     
     # act 노드(ToolNode)에서 state의 tool_calls를 보고 어떤 도구를 호출할지 결정함.
     # ToolNode가 state의 tool_calls 속성을 보고 도구 호출 여부와 호출할 도구를 결정함
     action_dict = response.tool_calls[0] if getattr(response, "tool_calls", None) else None
 
+    # message 히스토리에 LLM의 응답 추가하고 iteration_count 업데이트
     updates: dict[str, Any] = {
         "messages": [response],
         "iteration_count": state.get("iteration_count", 0) + 1,
     }
+    # thoughts/actions가 있으면 state에 추가
     if thought_text:
         updates["thoughts"] = [thought_text]
     if action_dict:
         updates["actions"] = [dict(action_dict)]
 
     if not state.get("current_goal"):
+        # 최초 1회에 한해 가장 최근 user 메시지를 current_goal로 세팅
+        # 최초 1회 말고 매 턴마다 유저의 채팅에서 goal을 추출하는거
         goal = latest_human_message_text(state.get("messages") or [])
         if goal:
             updates["current_goal"] = goal[:200]
@@ -104,6 +112,7 @@ def observe(state: BeautyAgentState) -> dict[str, Any]:
     collected: list[str] = []
     for msg in reversed(messages):
         if isinstance(msg, ToolMessage):
+            # 각 Tool들이 반환하는 content를 observations에 적재
             text = extract_text(msg.content)
             if text:
                 collected.append(text)
