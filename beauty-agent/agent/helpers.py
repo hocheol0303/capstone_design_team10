@@ -46,7 +46,7 @@ def latest_human_message_text(messages: list[BaseMessage]) -> str:
             return str(message.content)
     return ""
 
-
+# 정규표현식으로 텍스트에서 이미지 경로를 추출하는 함수
 def parse_image_path(text: str) -> str | None:
     patterns = [
         r"(?:image_path|path|경로)\s*[:=]\s*([^\s,]+)",
@@ -61,7 +61,7 @@ def parse_image_path(text: str) -> str | None:
         return inline_path.group(1).strip().strip("'\"")
     return None
 
-
+# 정규표현식으로 텍스트에서 성별을 추출하는 함수
 def parse_gender(text: str) -> str | None:
     normalized = text.lower()
     if re.search(r"(?:\b여자\b|\bfemale\b|\bwoman\b)", normalized):
@@ -95,6 +95,7 @@ def classify_intent(user_text: str) -> str:
         ])
         label = extract_text(getattr(response, "content", "")).strip().lower()
         return "report" if "report" in label else "general"
+    # 여기 예외는 보통 유니코드 인코딩 문제
     except Exception:  # noqa: BLE001
         return "general"
 
