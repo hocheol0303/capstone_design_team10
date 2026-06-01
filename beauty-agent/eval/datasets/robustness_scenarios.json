@@ -1,0 +1,94 @@
+{
+  "description": "Robustness scenarios — error paths the agent must handle gracefully without crashing. n=10.",
+  "scenarios": [
+    {
+      "id": "r01_missing_image",
+      "preconditions": [],
+      "user": "image_path=/workspace/samples/does_not_exist.jpg female 진단해줘",
+      "expect": {
+        "tool_call_present": "skin_analyze",
+        "graceful_message_substrings": ["파이프라인", "실패", "검출", "오류", "에러", "다시", "찾"],
+        "must_not_crash": true
+      }
+    },
+    {
+      "id": "r02_no_gender",
+      "preconditions": [],
+      "user": "image_path=/workspace/samples/028_data/0001/0001_01_F.jpg 진단해줘",
+      "expect": {
+        "graceful_message_substrings": ["성별"],
+        "must_not_crash": true
+      }
+    },
+    {
+      "id": "r03_report_without_data",
+      "preconditions": [],
+      "user": "최종 레포트 작성해줘",
+      "expect": {
+        "routed_to_insufficient": true,
+        "graceful_message_substrings": ["진단", "필요", "사진"],
+        "must_not_crash": true
+      }
+    },
+    {
+      "id": "r04_pubmed_api_failure",
+      "preconditions": ["image_path=/workspace/samples/028_data/0001/0001_02_F.jpg female 진단해줘"],
+      "user": "논문 근거 찾아줘",
+      "monkeypatch": "pubmed_esearch_fail",
+      "expect": {
+        "graceful_message_substrings": ["오류", "실패"],
+        "must_not_crash": true
+      }
+    },
+    {
+      "id": "r05_garbled_input",
+      "preconditions": [],
+      "user": "asdjf;laskjdf;lasjk image_path=??? 어떻게 해줘",
+      "expect": {
+        "must_not_crash": true
+      }
+    },
+    {
+      "id": "r06_empty_query",
+      "preconditions": [],
+      "user": " ",
+      "expect": {
+        "must_not_crash": true
+      }
+    },
+    {
+      "id": "r07_invalid_gender",
+      "preconditions": [],
+      "user": "image_path=/workspace/samples/028_data/0001/0001_03_F.jpg gender=robot 진단해줘",
+      "expect": {
+        "must_not_crash": true
+      }
+    },
+    {
+      "id": "r08_missing_image_then_recover",
+      "preconditions": ["image_path=/workspace/samples/does_not_exist.jpg female 진단해줘"],
+      "user": "image_path=/workspace/samples/028_data/0001/0001_01_F.jpg female 다시 진단해줘",
+      "expect": {
+        "tool_call_present": "skin_analyze",
+        "must_not_crash": true,
+        "skin_scores_populated": true
+      }
+    },
+    {
+      "id": "r09_report_after_partial_data",
+      "preconditions": ["image_path=/workspace/samples/028_data/0001/0001_01_F.jpg female 진단해줘"],
+      "user": "최종 레포트 작성해줘",
+      "expect": {
+        "must_not_crash": true
+      }
+    },
+    {
+      "id": "r10_unicode_emoji_query",
+      "preconditions": [],
+      "user": "🤔💆‍♀️ 안녕? 피부 분석 가능해요?",
+      "expect": {
+        "must_not_crash": true
+      }
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "description": "Images used for PubMed + DB evaluation runs (n=12). gender_input is sent to skin_analyze.",
+  "images": [
+    {"id": "img01", "path": "/workspace/samples/028_data/0001/0001_01_F.jpg",  "gender": "female"},
+    {"id": "img02", "path": "/workspace/samples/028_data/0001/0001_02_F.jpg",  "gender": "female"},
+    {"id": "img03", "path": "/workspace/samples/028_data/0001/0001_03_F.jpg",  "gender": "female"},
+    {"id": "img04", "path": "/workspace/samples/028_data/0001/0001_01_Ft.jpg", "gender": "female"},
+    {"id": "img05", "path": "/workspace/samples/028_data/0001/0001_01_Fb.jpg", "gender": "female"},
+    {"id": "img06", "path": "/workspace/samples/028_data/0001/0001_01_L15.jpg","gender": "female"},
+    {"id": "img07", "path": "/workspace/samples/028_data/0001/0001_01_R15.jpg","gender": "female"},
+    {"id": "img08", "path": "/workspace/samples/034_data/0000/0000_CRS_19_01.jpg", "gender": "female"},
+    {"id": "img09", "path": "/workspace/samples/034_data/0000/0000_CRS_46_01.jpg", "gender": "female"},
+    {"id": "img10", "path": "/workspace/samples/034_data/0002/0002_CRS_19_01.jpg", "gender": "female"},
+    {"id": "img11", "path": "/workspace/samples/034_data/0007/0007_CRS_19_01.jpg", "gender": "male"},
+    {"id": "img12", "path": "/workspace/samples/034_data/0007/0007_CRS_46_01.jpg", "gender": "male"}
+  ]
+}

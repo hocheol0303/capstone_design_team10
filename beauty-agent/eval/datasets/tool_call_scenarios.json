@@ -1,0 +1,229 @@
+{
+  "description": "Tool call accuracy scenarios. preconditions: optional prior turns to set state. expected_tools: list (order matters when length>1). guard: True means agent should NOT call the named tool.",
+  "scenarios": [
+    {
+      "id": "t01_single_skin_analyze",
+      "preconditions": [],
+      "user": "image_path=/workspace/samples/028_data/0001/0001_01_F.jpg female 이 사진 진단해줘",
+      "expected_tools": ["skin_analyze"],
+      "expected_args": {"skin_analyze": {"image_path": "/workspace/samples/028_data/0001/0001_01_F.jpg", "gender": "female"}},
+      "guard": false
+    },
+    {
+      "id": "t02_db_after_diagnosis",
+      "preconditions": ["image_path=/workspace/samples/028_data/0001/0001_02_F.jpg female 진단부터 해줘"],
+      "user": "이제 시술 추천해줘",
+      "expected_tools": ["recommend_treatment_db"],
+      "guard": false
+    },
+    {
+      "id": "t03_pubmed_after_diagnosis",
+      "preconditions": ["image_path=/workspace/samples/028_data/0001/0001_03_F.jpg female 진단해줘"],
+      "user": "관련 논문 근거만 찾아줘. 시술 추천은 하지 마",
+      "expected_tools": ["search_pubmed"],
+      "guard": false
+    },
+    {
+      "id": "t04_combined_diagnosis_then_db",
+      "preconditions": [],
+      "user": "image_path=/workspace/samples/028_data/0001/0001_01_F.jpg female 진단하고 바로 시술 추천까지 해줘",
+      "expected_tools": ["skin_analyze", "recommend_treatment_db"],
+      "expected_args": {"skin_analyze": {"image_path": "/workspace/samples/028_data/0001/0001_01_F.jpg", "gender": "female"}},
+      "guard": false
+    },
+    {
+      "id": "t05_full_pipeline",
+      "preconditions": [],
+      "user": "image_path=/workspace/samples/028_data/0001/0001_02_F.jpg female 진단, 시술 추천, 논문 근거까지 모두 진행해줘",
+      "expected_tools": ["skin_analyze", "recommend_treatment_db", "search_pubmed"],
+      "guard": false
+    },
+    {
+      "id": "t06_guard_db_without_diagnosis",
+      "preconditions": [],
+      "user": "진단은 건너뛰고 바로 시술 추천만 해줘",
+      "expected_tools": [],
+      "forbidden_tools": ["recommend_treatment_db"],
+      "guard": true
+    },
+    {
+      "id": "t07_guard_pubmed_without_diagnosis",
+      "preconditions": [],
+      "user": "진단 결과 없이 그냥 논문만 찾아줘",
+      "expected_tools": [],
+      "forbidden_tools": ["search_pubmed"],
+      "guard": true
+    },
+    {
+      "id": "t08_chitchat_no_tool",
+      "preconditions": [],
+      "user": "안녕? 너 어떤 작업을 할 수 있어?",
+      "expected_tools": [],
+      "guard": false
+    },
+    {
+      "id": "t09_male_diagnosis",
+      "preconditions": [],
+      "user": "image_path=/workspace/samples/034_data/0007/0007_CRS_19_01.jpg male 진단해줘",
+      "expected_tools": ["skin_analyze"],
+      "expected_args": {"skin_analyze": {"image_path": "/workspace/samples/034_data/0007/0007_CRS_19_01.jpg", "gender": "male"}},
+      "guard": false
+    },
+    {
+      "id": "t10_indirect_diagnosis",
+      "preconditions": [],
+      "user": "image=/workspace/samples/034_data/0000/0000_CRS_19_01.jpg female 이 분 피부 상태 좀 봐줄래?",
+      "expected_tools": ["skin_analyze"],
+      "guard": false
+    },
+    {
+      "id": "t11_db_then_pubmed",
+      "preconditions": ["image_path=/workspace/samples/028_data/0001/0001_01_F.jpg female 진단해줘"],
+      "user": "시술 추천하고 근거 논문도 같이 찾아줘",
+      "expected_tools": ["recommend_treatment_db", "search_pubmed"],
+      "guard": false
+    },
+    {
+      "id": "t12_pubmed_then_db",
+      "preconditions": ["image_path=/workspace/samples/028_data/0001/0001_02_F.jpg female 진단해줘"],
+      "user": "먼저 논문 근거 찾고 그 다음 시술 추천해줘",
+      "expected_tools": ["search_pubmed", "recommend_treatment_db"],
+      "guard": false
+    },
+    {
+      "id": "t13_idempotent_no_re_analyze",
+      "preconditions": ["image_path=/workspace/samples/028_data/0001/0001_03_F.jpg female 진단해줘"],
+      "user": "방금 진단 다시 한 번 확인해줘",
+      "expected_tools": [],
+      "forbidden_tools": ["skin_analyze"],
+      "guard": true,
+      "note": "동일 이미지 재분석은 비효율. 좋은 에이전트는 기존 결과로 답함."
+    },
+    {
+      "id": "t14_followup_question",
+      "preconditions": ["image_path=/workspace/samples/028_data/0001/0001_01_F.jpg female 진단해줘"],
+      "user": "팔자주름 점수가 몇 점이었지?",
+      "expected_tools": [],
+      "guard": false
+    },
+    {
+      "id": "t15_question_about_treatment",
+      "preconditions": [],
+      "user": "보톡스에 대해 일반적으로 어떻게 진행되는지 알려줘",
+      "expected_tools": [],
+      "guard": false
+    },
+    {
+      "id": "t16_recover_from_guard",
+      "preconditions": ["시술 추천해줘"],
+      "user": "image_path=/workspace/samples/028_data/0001/0001_02_F.jpg female 이제 진단해줘",
+      "expected_tools": ["skin_analyze"],
+      "guard": false
+    },
+    {
+      "id": "t17_full_pipeline_implicit_order",
+      "preconditions": [],
+      "user": "image_path=/workspace/samples/034_data/0002/0002_CRS_19_01.jpg female 진단, 시술 추천, 근거 모두 부탁",
+      "expected_tools": ["skin_analyze", "recommend_treatment_db", "search_pubmed"],
+      "guard": false
+    },
+    {
+      "id": "t18_skin_only_male_034",
+      "preconditions": [],
+      "user": "image_path=/workspace/samples/034_data/0000/0000_CRS_46_01.jpg male 진단만 해줘",
+      "expected_tools": ["skin_analyze"],
+      "expected_args": {"skin_analyze": {"image_path": "/workspace/samples/034_data/0000/0000_CRS_46_01.jpg", "gender": "male"}},
+      "guard": false
+    },
+    {
+      "id": "t19_guard_db_again",
+      "preconditions": [],
+      "user": "사진은 없는데 일단 시술 추천 해 줄 수 있어?",
+      "expected_tools": [],
+      "forbidden_tools": ["recommend_treatment_db"],
+      "guard": true
+    },
+    {
+      "id": "t20_guard_pubmed_again",
+      "preconditions": [],
+      "user": "진단은 다음에 할 거고 일단 PubMed 논문만 좀 보여줘",
+      "expected_tools": [],
+      "forbidden_tools": ["search_pubmed"],
+      "guard": true
+    },
+    {
+      "id": "t21_simple_greeting",
+      "preconditions": [],
+      "user": "안녕하세요",
+      "expected_tools": [],
+      "guard": false
+    },
+    {
+      "id": "t22_thanks",
+      "preconditions": [],
+      "user": "감사합니다",
+      "expected_tools": [],
+      "guard": false
+    },
+    {
+      "id": "t23_full_pipeline_emphasized",
+      "preconditions": [],
+      "user": "image=/workspace/samples/034_data/0002/0002_CRS_46_01.jpg female 진단, DB 추천, 논문 근거를 빠짐없이 다 해줘",
+      "expected_tools": ["skin_analyze", "recommend_treatment_db", "search_pubmed"],
+      "guard": false
+    },
+    {
+      "id": "t24_db_only_after_diag",
+      "preconditions": ["image_path=/workspace/samples/028_data/0001/0001_03_F.jpg female 진단해줘"],
+      "user": "DB에서 시술만 추천해줘. 논문은 됐어",
+      "expected_tools": ["recommend_treatment_db"],
+      "forbidden_tools": ["search_pubmed"],
+      "guard": true
+    },
+    {
+      "id": "t25_pubmed_only_explicit",
+      "preconditions": ["image_path=/workspace/samples/028_data/0001/0001_01_F.jpg female 진단해줘"],
+      "user": "논문 근거만 찾아줘. DB 추천은 호출하지 마",
+      "expected_tools": ["search_pubmed"],
+      "forbidden_tools": ["recommend_treatment_db"],
+      "guard": true
+    },
+    {
+      "id": "t26_skin_with_relative_path",
+      "preconditions": [],
+      "user": "/workspace/samples/034_data/0007/0007_CRS_46_01.jpg male 진단해줘",
+      "expected_tools": ["skin_analyze"],
+      "expected_args": {"skin_analyze": {"image_path": "/workspace/samples/034_data/0007/0007_CRS_46_01.jpg", "gender": "male"}},
+      "guard": false
+    },
+    {
+      "id": "t27_clarify_capability",
+      "preconditions": [],
+      "user": "너는 무슨 정보를 알려줄 수 있어?",
+      "expected_tools": [],
+      "guard": false
+    },
+    {
+      "id": "t28_explain_score",
+      "preconditions": [],
+      "user": "점수가 낮을수록 안 좋다고 들었는데 맞아?",
+      "expected_tools": [],
+      "guard": false
+    },
+    {
+      "id": "t29_full_pipeline_again",
+      "preconditions": [],
+      "user": "image_path=/workspace/samples/028_data/0001/0001_01_F.jpg female 다 해줘",
+      "expected_tools": ["skin_analyze", "recommend_treatment_db", "search_pubmed"],
+      "guard": false
+    },
+    {
+      "id": "t30_guard_both",
+      "preconditions": [],
+      "user": "진단 없이 그냥 시술 추천과 논문 둘 다 알려줘",
+      "expected_tools": [],
+      "forbidden_tools": ["recommend_treatment_db", "search_pubmed"],
+      "guard": true
+    }
+  ]
+}
